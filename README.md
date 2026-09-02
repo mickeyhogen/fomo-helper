@@ -10,7 +10,7 @@
 > **声明**：本扩展为独立的第三方开源工具，与 fomo.family、DeBot 及相关方**无任何隶属、
 > 授权或合作关系**。所有商标归各自所有者。它只在你浏览时聚合展示公开数据，不收集你的任何信息。
 
-![卡片](test/screenshots/01-public-docked.png)
+![卡片实拍](docs/assets/real-hero.png)
 
 ---
 
