@@ -26,11 +26,6 @@ const SESSION_PREFIX = 'debot-story:';
 
 // 自定义分析源：URL 模板来自设置，{ca} 替换成代币地址。
 // 可能指向内网/自建服务，慢了不能拖住 DeBot 段，所以硬超时很短。
-const ANALYSIS_TTL_MS = 60 * 1000;
-const ANALYSIS_TIMEOUT_MS = 2500;
-const ANALYSIS_PREFIX = 'analysis-doc:';
-
-// FxTwitter 公开推文
 const TWEET_BASE = 'https://api.fxtwitter.com/i/status/';
 const TWEET_TTL_MS = 30 * 60 * 1000;
 const TWEET_TIMEOUT_MS = 6000;
@@ -38,11 +33,8 @@ const TWEET_PREFIX = 'debot-tweet:';
 const TWEET_MAX = 3;
 
 const SETTING_DEFAULTS = {
-  analysisTemplate: '',
-  detailTemplate: '',
   // 高级·仅自用：允许 http / 内网 / 自建分析源（默认 false = 只收 https 公网地址）。
   // 只影响用户自配的分析源；DeBot / FxTwitter 永远锁死在各自的固定公网 https 端点。
-  allowPrivateAnalysisSource: false,
 };
 
 let settingsMemo = null;
@@ -80,75 +72,6 @@ try {
     if (area === 'sync') { settingsMemo = null; settingsGen++; }
   });
 } catch (_) { /* 忽略 */ }
-
-const originOf = (url) => {
-  try { return new URL(url).origin; } catch (_) { return null; }
-};
-
-/**
- * 自定义分析源只允许 https 公网地址。
- *
- * 后台的 fetch 是带着 host 授权发出的，没有页面 CORS 约束。若允许 http 或内网/环回
- * 地址，"在 fomo 上看到某个 CA" 就能被变成一次由扩展代发的内网探测（SSRF），
- * 而且响应还会被渲染进卡片。宁可少一个便利，也不留这个洞。
- */
-function isPublicHostname(hostRaw) {
-  const host = String(hostRaw || '').trim().toLowerCase().replace(/\.$/, '');
-  if (!host) return false;
-  if (host === 'localhost' || host.endsWith('.localhost')) return false;
-  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
-
-  // IPv6 字面量：环回 / 唯一本地 / 链路本地一律挡；其余裸 IPv6 也没有正当理由当分析源
-  if (host.indexOf(':') !== -1) return false;
-
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (m) {
-    const p = m.slice(1).map(Number);
-    if (p.some((x) => !isFinite(x) || x > 255)) return false;
-    if (p[0] === 0 || p[0] === 127 || p[0] === 10) return false;             // 本机 / 私有 A
-    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return false;              // 私有 B
-    if (p[0] === 192 && p[1] === 168) return false;                          // 私有 C
-    if (p[0] === 169 && p[1] === 254) return false;                          // 链路本地
-    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return false;             // CGNAT / 组网内网段
-    if (p[0] === 198 && p[1] >= 18 && p[1] <= 19) return false;              // 基准测试段 198.18/15
-    if (p[0] === 192 && p[1] === 0 && p[2] === 0) return false;              // IETF 协议分配 192.0.0/24
-    if (p[0] === 192 && p[1] === 88 && p[2] === 99) return false;            // 已废弃 6to4 anycast
-    if (p[0] >= 224) return false;                                           // 组播 / 保留
-    return true;
-  }
-
-  if (host.indexOf('.') === -1) return false; // 裸主机名 = 内网短名
-  return true;
-}
-
-function isPublicHttpsUrl(url) {
-  let u;
-  try { u = new URL(url); } catch (_) { return false; }
-  if (u.protocol !== 'https:') return false;
-  if (u.username || u.password) return false;   // URL 内嵌凭据一律不收
-  return isPublicHostname(u.hostname);
-}
-
-/** 开关打开时的最低准入：仍必须是 http/https，绝不放行 file:/ftp:/data: 之类。 */
-function isHttpLikeUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.username || u.password) return false;  // 内嵌凭据在高级开关下同样不收
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch (_) { return false; }
-}
-
-/** manifest 里静态授权的源；分析源等其余地址必须走 optional_host_permissions 动态授权。 */
-const STATIC_ORIGINS = API_BASES.concat(['https://api.fxtwitter.com']);
-
-async function hasPermission(url) {
-  const origin = originOf(url);
-  if (!origin) return false;
-  if (STATIC_ORIGINS.indexOf(origin) !== -1) return true;
-  try {
-    return await chrome.permissions.contains({ origins: [origin + '/*'] });
-  } catch (_) { return false; }
-}
 
 /** @type {Map<string, {at:number, res:object}>} */
 const memCache = new Map();
@@ -309,77 +232,6 @@ async function handleStory(msg) {
 // 2) 自定义分析源（用户自配 URL 模板；没配 = 这段不存在）
 // ---------------------------------------------------------------------------
 
-/** {ca} 占位替换；0x 地址统一小写（多数静态站按小写文件名存）。 */
-function buildAnalysisUrl(template, ca) {
-  const t = String(template || '').trim();
-  if (!t || t.indexOf('{ca}') === -1) return null;
-  const key = isHex(ca) ? ca.toLowerCase() : ca;
-  const url = t.split('{ca}').join(encodeURIComponent(key));
-  return originOf(url) ? url : null;
-}
-
-/** 文档里的 address 必须与查询的 CA 自洽，否则等同"没有档案"——张冠李戴比没有更危险。 */
-function analysisMatches(doc, ca) {
-  if (!doc || typeof doc !== 'object') return false;
-  const addr = doc.address || doc.ca || doc.contract_address;
-  return typeof addr === 'string' && sameCa(addr, ca);
-}
-
-async function fetchAnalysis(ca) {
-  const settings = await getSettings();
-  const url = buildAnalysisUrl(settings.analysisTemplate, ca);
-  if (!url) return { ok: false, kind: 'disabled', error: '未配置分析源' };
-
-  // 准入校验在授权检查之前：不合格的地址一次网络请求都不许发出去。
-  //   默认（开关关）：只收 https 公网地址，挡住 http/内网/环回/CGNAT/链路本地（SSRF 防线）。
-  //   开关开（高级·仅自用）：放宽到任意 http/https 地址，交给用户对自己的内网源负责。
-  const admitted = settings.allowPrivateAnalysisSource
-    ? isHttpLikeUrl(url)
-    : isPublicHttpsUrl(url);
-  if (!admitted) {
-    return { ok: false, kind: 'blocked', error: '分析源地址不合规' };
-  }
-
-  if (!(await hasPermission(url))) {
-    return { ok: false, kind: 'no-permission', error: '未授权访问分析源，去设置里重新保存' };
-  }
-
-  const out = await fetchJson(url, ANALYSIS_TIMEOUT_MS);
-
-  if (out.stage === 'http') {
-    if (out.status === 404) return { ok: false, kind: 'absent', error: '分析源里没有这只币' };
-    return { ok: false, kind: 'network', error: '分析源返回 HTTP ' + out.status };
-  }
-  if (out.stage === 'timeout') return { ok: false, kind: 'network', error: '分析源无响应（超时）' };
-  if (out.stage === 'network') return { ok: false, kind: 'network', error: '分析源不可达' };
-  if (out.stage === 'parse') return { ok: false, kind: 'network', error: '分析源返回的不是合法 JSON' };
-
-  const doc = out.json;
-  if (!doc || typeof doc !== 'object') {
-    return { ok: false, kind: 'absent', error: '分析源里没有这只币' };
-  }
-  if (!analysisMatches(doc, ca)) {
-    return { ok: false, kind: 'absent', error: '分析源里没有这只币' };
-  }
-  return { ok: true, payload: doc };
-}
-
-async function handleAnalysis(msg) {
-  const ca = msg && typeof msg.ca === 'string' ? msg.ca.trim() : '';
-  if (!ca) return { ok: false, kind: 'network', error: '缺少合约地址' };
-
-  // 缓存键必须带上模板本身：换了分析源却还吐上一个源的旧档案，比没有缓存危险得多
-  const settings = await getSettings();
-  const key = cacheKey(ca) + '|' + String(settings.analysisTemplate || '');
-  if (!msg.force) {
-    const cached = await readCache(ANALYSIS_PREFIX, key, ANALYSIS_TTL_MS);
-    if (cached) return cached;
-  }
-  const res = await fetchAnalysis(ca);
-  if (res.ok || res.kind === 'absent') await writeCache(ANALYSIS_PREFIX, key, res);
-  return res;
-}
-
 // ---------------------------------------------------------------------------
 // 3) FxTwitter 来源推文正文
 // ---------------------------------------------------------------------------
@@ -428,7 +280,8 @@ async function handleTweets(msg) {
 
 const ROUTES = {
   'debot-story': handleStory,
-  'analysis-doc': handleAnalysis,
+  // 公开版不含自定义分析源：保留路由存根，content.js 即便询问也只会拿到 disabled。
+  'analysis-doc': async () => ({ ok: false, kind: 'disabled', error: '公开版不含分析源' }),
   'debot-tweets': handleTweets,
 };
 

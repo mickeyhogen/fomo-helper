@@ -11,10 +11,6 @@
     "https://debot.ai/*",
     "https://api.fxtwitter.com/*"
   ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
-  ],
   "background": {
     "service_worker": "background.js"
   },

@@ -39,14 +39,6 @@
   .field { padding: 7px 0; }
   .field + .field { border-top: 1px solid #1a1c20; }
   .field label { display: block; margin-bottom: 4px; }
-  .msg { font-size: 11px; margin-top: 4px; min-height: 14px; }
-  .msg.err { color: #ff7b72; }
-  .msg.ok { color: #6fd8ab; }
-  .adv { padding: 8px 0 2px; border-top: 1px solid #1a1c20; margin-top: 2px; }
-  .adv .row { padding: 4px 0; align-items: flex-start; }
-  .warn-lbl { color: #ff9d92; font-size: 11px; line-height: 1.45; cursor: pointer; }
-  .warn-hint { color: #7f8590; font-size: 11px; margin-top: 2px; }
-  #allowPrivate { accent-color: #ff7b72; margin-top: 1px; }
   .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2024;
           font-size: 11px; color: #62666e; }
 </style>
@@ -85,39 +77,7 @@
     </div>
   </div>
 
-  <div class="group">
-    <div class="gtitle">数据源</div>
-
-    <div class="field">
-      <label for="analysisTemplate">分析源 URL 模板（可选）</label>
-      <input type="text" id="analysisTemplate" placeholder="https://my-host/data/{ca}.json">
-      <div class="hint">用 {ca} 占位；必须是 https 公网地址；留空则「AI 判断」段不显示</div>
-    </div>
-
-    <div class="field">
-      <label for="detailTemplate">详情页 URL 模板（可选）</label>
-      <input type="text" id="detailTemplate" placeholder="https://my-host/report/{ca}.html">
-      <div class="hint">填了才会出现「查看完整分析」链接</div>
-    </div>
-
-    <div class="adv">
-      <div class="row">
-        <span>
-          <label for="allowPrivate" class="warn-lbl">⚠️ 高级·仅自用：允许 http 或内网/自建分析源</label>
-          <div class="warn-hint">公网用户请勿开启，有 SSRF 风险。仅当你把 dossier 放在自己的内网/局域网/自建服务上时才需要。默认关闭 = 只收 https 公网地址。</div>
-        </span>
-        <input type="checkbox" id="allowPrivate">
-      </div>
-    </div>
-
-    <div class="msg" id="msg"></div>
-    <button type="button" id="save" style="width:100%;background:#1a1c20;color:#e6e7ea;
-      border:1px solid #2c2f35;border-radius:6px;padding:6px;cursor:pointer;font-size:12px;">
-      保存数据源设置
-    </button>
-  </div>
-
-  <div class="foot">通用设置即时生效；数据源需点保存并授权。</div>
+  <div class="foot">设置改完即时生效。</div>
   <script src="popup.js"></script>
 </body>
 </html>

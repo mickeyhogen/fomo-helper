@@ -129,10 +129,9 @@
 
 <section id="what">
   <div class="wrap">
-    <div class="secno">01</div>
-    <h2>它做什么</h2>
-    <p class="seclede">进入任意代币页，卡片自动弹出（可关）。顶部三个标签页，答的是同一个问题的三个层次：
-      <b style="color:var(--text)">这币的叙事是什么，社区在拿什么理由持仓，都是谁在拿。</b></p>
+    <h2>卡片里有什么</h2>
+    <p class="seclede">进入任意代币页，卡片自动弹出（可关）。顶部三个标签，是同一个问题的三个层次：
+      <b style="color:var(--text)">这币讲的什么故事，社区拿什么理由持仓，掏钱的都是谁。</b></p>
 
     <div class="feat">
       <div>
@@ -167,7 +166,7 @@
       <div>
         <h3>一切可调</h3>
         <p>自动弹出三档（精简 / 全展开 / 关闭）、默认语言、悬停预览开关，都在扩展图标的设置面板里。
-          还可以接入<b>你自己的分析源</b>（可选，见下方数据边界）。</p>
+          就这三项——<b>没有账号、没有登录、没有要你填的地址</b>，装完就能用。</p>
       </div>
       <div class="img"><img class="shot" src="assets/12-settings.png" alt="设置面板"></div>
     </div>
@@ -176,14 +175,16 @@
 
 <section id="privacy">
   <div class="wrap">
-    <div class="secno">02</div>
-    <h2>数据边界 — 装之前先说清</h2>
-    <p class="seclede">一个装在交易网站上的扩展，你最该问的不是它有什么功能，而是它把数据发给了谁。逐条回答：</p>
+    <h2>它碰得到什么，碰不到什么</h2>
+    <p class="seclede">装在交易网站上的东西，能力边界比功能清单重要。所以这一节反着写——
+      先说它<b style="color:var(--text)">做不到</b>什么，再说它伸手够得着的那几个地方。</p>
 
     <div class="bigclaim">
-      <b>本扩展没有服务器。</b>
-      <p>不存在"我们的后端"。没有账号体系、没有遥测、没有统计上报。你的名单和设置只存在你浏览器本地的
-        chrome.storage 里，卸载即清除。以下四处是它全部的数据接触面——manifest 里声明的域名你可以自己核对。</p>
+      <b>它没有后端，所以它连"偷偷上传"这个动作都做不到。</b>
+      <p>这不是承诺，是结构：这个项目里没有任何服务器代码，也没有账号体系。设置只写在你浏览器本地的
+        chrome.storage，卸载即清除。它<b style="color:var(--text)">不读你的 fomo 登录态</b>——观点和持仓者是直接读页面上
+        fomo 自己已经渲染好的内容，一个网络请求都不发。它也<b style="color:var(--text)">只活在 fomo.family 一个域名上</b>，
+        别的网站你打开它是完全不存在的。这几句 manifest 里都写着，两行就能自己核对完。</p>
       <p style="margin-top:12px"><b style="color:var(--text)">同时诚实说清：</b>拉取叙事和推文要向 DeBot 与 FxTwitter 两个第三方公开接口发查询，
         它们的服务器能在自己日志里看到「某 IP 查询了某代币」。这是拉取式工具绕不开的，但那不是我们在采集你——
         我们既没有服务器也收不到。介意的话可以只用观点/持仓者两页，那两页<b style="color:var(--text)">零网络</b>。</p>
@@ -194,25 +195,23 @@
       <tr><th>接触点</th><th>用途</th><th>性质</th></tr>
       <tr><td>app.debot.ai</td><td>拉取代币叙事分析</td><td>公开接口，不登录、不带 cookie、无 key</td></tr>
       <tr><td>fomo.family 页面 DOM</td><td>观点与持仓者</td><td><b>零网络</b>：只读页面上已渲染的内容，不发任何请求，<b>不碰你的登录态</b></td></tr>
-      <tr><td>你填的分析源</td><td>「AI 判断」段</td><td>可选。不填就完全不存在；填了才申请该域名授权</td></tr>
       <tr><td>api.fxtwitter.com</td><td>叙事来源推文正文</td><td>公开只读，不登录、不发帖</td></tr>
     </table>
     </div>
 
-    <div class="warnbox">
-      <b>自定义分析源为什么卡得很死：</b>那条请求由扩展后台代发、不受页面 CORS 约束。所以默认<b>只收 https 公网地址</b>，
-      内网 / 环回 / 链路本地 / CGNAT / 基准测试段、裸主机名、IPv6 字面量与内嵌凭据的 URL 在发出前一律拒绝，且不跟随任何重定向。<b>已知边界</b>：这是基于主机名的检查，管不了 DNS 解析结果——把 A 记录指向内网的公网域名仍会通过，所以请只填你自己信任的源。
-      给自建内网源保留了一个默认关闭的「高级·仅自用」开关，开了也仍需逐域名显式授权。
-      完整版见 <a href="https://github.com/mickey-hogen/fomo-narrative-lens/blob/main/PRIVACY.md">隐私说明</a>。
+    <div class="warnbox" style="border-color:var(--border);background:var(--surface)">
+      <b style="color:var(--text)">公开版没有"自定义数据源"这个功能。</b>
+      早期自用版允许填自己的分析源，那意味着扩展要替你去访问一个任意地址——这类能力一旦公开发布，
+      就是别人拿来做内网探测的入口。所以公开版把这条路整个拆了：设置面板里没有这一项，
+      代码里没有对应的请求路径，manifest 里也不再申请任何通配域名权限。它能访问的就是上面表里那两个固定域名，多一个都没有。
     </div>
   </div>
 </section>
 
 <section id="install">
   <div class="wrap">
-    <div class="secno">03</div>
-    <h2>安装</h2>
-    <p class="seclede">以「已解压扩展」方式加载，不经过应用商店，全程约一分钟。Chrome、Edge、Brave 通用（Safari / Firefox 不支持）。</p>
+    <h2>装上它</h2>
+    <p class="seclede">不经过应用商店，直接加载源目录，一分钟。Chrome / Edge / Brave 通用（Safari、Firefox 内核不同，不支持）。</p>
 
     <div class="ostabs" role="tablist">
       <button id="tab-mac" class="on" onclick="pickOS('mac')">macOS</button>
@@ -261,8 +260,7 @@
 
 <section id="faq">
   <div class="wrap">
-    <div class="secno">04</div>
-    <h2>常见问题</h2>
+    <h2>不对劲的时候</h2>
 
     <details>
       <summary>装好了，页面上什么都没出现</summary>
@@ -282,7 +280,7 @@
     <details>
       <summary>它会碰我的 fomo 登录态或钱包吗</summary>
       <div class="a"><b>不会。</b>扩展不向 fomo 发任何网络请求（观点/持仓是读页面已渲染的内容），
-        不读取、不存储、不外发任何令牌，更没有触碰钱包的权限。详见上方「数据边界」与
+        不读取、不存储、不外发任何令牌，更没有触碰钱包的权限。详见上方「它碰得到什么」与
         <a href="https://github.com/mickey-hogen/fomo-narrative-lens/blob/main/PRIVACY.md">PRIVACY.md</a>。</div>
     </details>
     <details>

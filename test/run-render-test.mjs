@@ -119,8 +119,6 @@ const server = https.createServer({
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const PORT = server.address().port;
 const BASE = `https://analysis.test:${PORT}`;
-const ANALYSIS_TPL = `${BASE}/analysis/{ca}.json`;
-const DETAIL_TPL = `${BASE}/report/{ca}.html`;
 
 // 明文 http 站点：模拟"用户自建在内网/局域网/Tailscale 上、走 http 的 dossier 源"。
 // 页面与分析源同为 http://127.0.0.1（同源，无混合内容），host 又是 127.x 环回 →
@@ -133,7 +131,6 @@ const PRIVATE_HTTP_TPL = `${HTTP_BASE}/analysis/{ca}.json`;
 
 // v0.6 默认防线要挡掉的两种形态（开关关时）
 const HTTP_TPL = `http://analysis.test:${PORT}/analysis/{ca}.json`;
-const PRIVATE_TPL = 'https://192.168.1.5/analysis/{ca}.json';
 
 // ---------- chrome API 桩（导航前注入） ----------
 function chromeShim(fx) {
@@ -166,8 +163,7 @@ function chromeShim(fx) {
   // v0.7.2: 默认不预置 openMode/autoOpen → content.js resolveOpenMode 回落 'compact'（= 老 autoOpen:true 语义）。
   // fx.syncSeed 可注入初始 sync 值（用来测 openMode='full'/'off' 与老 autoOpen 迁移）。
   const store = {
-    sync: Object.assign({ hoverPreview: true, lang: 'zh', analysisTemplate: '', detailTemplate: '',
-            allowPrivateAnalysisSource: false }, fx.syncSeed || {}),
+    sync: Object.assign({ hoverPreview: true, lang: 'zh' }, fx.syncSeed || {}),
     local: Object.assign({}, fx.localSeed || null), session: {},
   };
   const listeners = [];
@@ -761,147 +757,8 @@ try {
   ]);
   await shot(page, '06-order-no-analysis.png');
 
-  // --- 13 配置分析源（fast 档，无 creatorOpenCount → 无 Dev 行） ---
-  await page.evaluate((tpl, dtl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: dtl }), ANALYSIS_TPL, DETAIL_TPL);
-  await sleep(900);
-  s = await snap(page);
-  step('步骤 13 · 配置后经 URL 模板真实取回分析文档（fast 档）', [
-    chk('设置即时生效，无需重开卡片', s.state.analysis === 'ready', s.state.analysis),
-    chk('个人模式下星级出现', s.starsOn === 4, s.starsOn),
-    chk('评级理由依然在', s.summaries.includes('评级理由'), s.summaries),
-    chk('出现 AI 判断标题', s.sectionTitles.includes('AI 判断'), s.sectionTitles),
-    chk('oneLiner 渲染', s.analysisText.includes('只配观察不配追'), s.analysisText.slice(0, 50)),
-    chk('meme点 渲染', s.kvKeys.includes('meme点'), s.kvKeys),
-    chk('技术/红旗合并行', s.kvKeys.includes('技术 / 红旗'), s.kvKeys),
-    chk('分析源不渲染任何 Dev 开盘次数行', !s.analysisKv.some((t) => t.indexOf('Dev') === 0), s.analysisKv),
-    chk('详情链接用 {ca} 模板', s.detailLink === DETAIL_TPL.replace('{ca}', PONS_CA), s.detailLink),
-  ]);
-  await shot(page, '07-personal-analysis.png');
-
-  // --- 14 deep 文档 + meme 截断 + Dev 开盘次数 ---
-  await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
-  await sleep(900);
-  s = await snap(page);
-  step('步骤 14 · deep 文档渲染 + meme点 截断', [
-    chk('label 徽章 no_chase', s.badges.includes('no_chase'), s.badges),
-    chk('meme点 渲染 SHERWOOD 的梗', s.memeText.includes('Robin Hood 住 Sherwood Forest'), s.memeText.slice(0, 40)),
-    chk('158 字超 120 → 截断并给展开钮', s.memeMore === '展开', s.memeMore),
-    chk('即便档案里带 creatorOpenCount 也不渲染 Dev 行',
-      !s.analysisKv.some((t) => t.indexOf('Dev') === 0), s.analysisKv),
-  ]);
-  await page.evaluate(() => { const b = window.__fomoDebotTestHandle.shadow.querySelector('.memehook .more'); if (b) b.click(); });
-  await sleep(120);
-  s = await snap(page);
-  step('步骤 14b · meme点 展开后给出完整笑话', [
-    chk('展开后出现尾巴', s.memeText.includes('四个 Sherwood 在抢同一个名字心智'), null),
-    chk('按钮变为收起', s.memeMore === '收起', s.memeMore),
-  ]);
-  await shot(page, '08-analysis-deep.png');
-
-  // --- 15 身份校验 ---
-  await pushState(page, `/tokens/robinhood/${MISMATCH_CA}`);
-  await sleep(900);
-  s = await snap(page);
-  step('步骤 15 · 分析文档 address 与查询 CA 不符 → 当作没有档案', [
-    chk('状态为 absent', s.state.analysis === 'absent', s.state.analysis),
-    chk('显示"分析源里还没有这只币"', s.analysisText.includes('分析源里还没有这只币'), s.analysisText),
-    chk('不渲染别的币的结论', !s.analysisText.includes('只配观察不配追'), null),
-  ]);
-
-  // --- 16 未授权 ---
-  await page.evaluate(() => { window.__grantPerm = false; });
-  await pushState(page, `/tokens/robinhood/${NOPERM_CA}`);
-  await sleep(700);
-  s = await snap(page);
-  step('步骤 16 · 未授权访问分析源 → 明确提示去设置里重新保存', [
-    chk('状态为 error', s.state.analysis === 'error', s.state.analysis),
-    chk('提示文案正确', s.analysisText.includes('未授权访问分析源，去设置里重新保存'), s.analysisText),
-    chk('DeBot 段不受影响', s.debotText.includes('起源'), null),
-  ]);
-  await page.evaluate(() => { window.__grantPerm = true; });
-
-  // --- 17 渐进渲染 ---
-  await pushState(page, `/tokens/robinhood/${SLOW_CA}`);
-  await sleep(350);
-  const mid = await snap(page);
-  await sleep(1000);
-  s = await snap(page);
-  step('步骤 17 · 分析源慢响应不拖累 DeBot（渐进渲染）', [
-    chk('分析源还在等时 DeBot 已渲染', mid.debotText.includes('起源'), mid.debotText.slice(0, 40)),
-    chk('此刻分析段仍是读取中', mid.analysisText.includes('读取中'), mid.analysisText),
-    chk('最终分析段落地为无档案', s.analysisText.includes('分析源里还没有这只币'), s.analysisText),
-    chk('DeBot 段完好', s.debotText.includes('起源') && s.debotText.includes('评级理由'), null),
-  ]);
-
-  // --- 17b 分析源准入：只收 https 公网地址（内网/环回/明文一律不发请求） ---
-  {
-    const before = analysisHits.length;
-    await page.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: '' }), HTTP_TPL);
-    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
-    await sleep(800);
-    const httpSnap = await snap(page);
-    const afterHttp = analysisHits.length;
-
-    await page.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: '' }), PRIVATE_TPL);
-    await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
-    await sleep(800);
-    const privSnap = await snap(page);
-    const afterPriv = analysisHits.length;
-
-    // 回到合规的 https 公网模板，证明正常路径没被误伤
-    await page.evaluate((tpl, dtl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: dtl }), ANALYSIS_TPL, DETAIL_TPL);
-    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
-    await sleep(900);
-    const okSnap = await snap(page);
-
-    step('步骤 17b · 开关关（默认）时分析源必须是 https 公网地址：http/内网一律拦在请求之前', [
-      chk('http:// 模板被拦下', httpSnap.analysisText.includes('分析源必须是 https 公网地址'), httpSnap.analysisText),
-      chk('http:// 模板一次请求都没发出去', afterHttp === before, [before, afterHttp]),
-      chk('内网 IP 模板被拦下', privSnap.analysisText.includes('不支持内网/本地地址'), privSnap.analysisText),
-      chk('内网 IP 模板一次请求都没发出去', afterPriv === afterHttp, [afterHttp, afterPriv]),
-      chk('被拦时不泄露任何内部错误串', !LEAK_RE.test(httpSnap.text) && !LEAK_RE.test(privSnap.text), null),
-      chk('合规 https 公网模板照常取回文档', okSnap.state.analysis === 'ready', okSnap.state.analysis),
-      chk('DeBot 段全程不受影响', okSnap.debotText.includes('起源'), null),
-    ]);
-  }
-
-  // --- 17b-2 高级开关 ON：http + 内网/环回 自建分析源被放行并真的取回文档 ---
-  // 单开一个 http 页面（页面与源同为 http://127.0.0.1，同源无混合内容），
-  // 源地址 http://127.0.0.1 同时踩中"明文"与"环回"两条默认防线，开关关会被双重拦下、
-  // 开关开则放行。用它一次性证明：默认安全、开关是唯一的放行开关。
-  {
-    const beforePriv = privateHits.length;
-
-    // 先证明"开关仍关"时，这个 http 内网源照样被挡（零请求）
-    const pOff = await openPage({}, HTTP_BASE);
-    await pOff.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, allowPrivateAnalysisSource: false }), PRIVATE_HTTP_TPL);
-    await sleep(150);
-    await pushState(pOff, `/tokens/robinhood/${PONS_CA}`);
-    await sleep(900);
-    const offSnap = await snap(pOff);
-    const afterOff = privateHits.length;
-    await pOff.close();
-
-    // 再打开高级开关，同一个源应被放行并成功取回
-    const pOn = await openPage({}, HTTP_BASE);
-    await pOn.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, allowPrivateAnalysisSource: true }), PRIVATE_HTTP_TPL);
-    await sleep(150);
-    await pushState(pOn, `/tokens/robinhood/${PONS_CA}`);
-    await sleep(1000);
-    const onSnap = await snap(pOn);
-    const afterOn = privateHits.length;
-    await pOn.close();
-
-    step('步骤 17b-2 · 高级开关 ON → http/内网自建源被放行并真的取回文档（OFF 仍拦）', [
-      chk('开关关：http 内网源仍被拦', offSnap.analysisText.includes('分析源必须是 https 公网地址'), offSnap.analysisText),
-      chk('开关关：内网源零请求', afterOff === beforePriv, [beforePriv, afterOff]),
-      chk('开关开：内网源被放行，分析段就绪', onSnap.state.analysis === 'ready', onSnap.state.analysis),
-      chk('开关开：http 内网站点确实收到了请求', afterOn > afterOff, [afterOff, afterOn]),
-      chk('开关开：渲染出分析结论（oneLiner）', onSnap.analysisText.includes('只配观察不配追'), onSnap.analysisText.slice(0, 40)),
-      chk('DeBot / FxTwitter 主机不受开关影响（DeBot 段照常）', onSnap.debotText.includes('起源'), null),
-      chk('放行路径也不泄露任何内部串', !LEAK_RE.test(onSnap.text), (onSnap.text.match(LEAK_RE) || [])[0]),
-    ]);
-  }
+  // 公开版不含自定义分析源：原步骤 13-17b-2（模板取数/授权/SSRF 准入）随该能力一并移除。
+  // 「AI 判断」段永不出现由步骤 11 守住。
 
   // --- 17c 任何一段失败都只出一句友好灰字，绝不把内部 kind/原始错误串摊给主人 ---
   {
@@ -915,16 +772,14 @@ try {
       chk('DeBot 失败显示友好灰字', errSnap.debotText.includes('这段暂时读不到'), errSnap.debotText.slice(0, 60)),
       chk('DeBot 失败仍给重试钮', errSnap.debotText.includes('重试'), errSnap.debotText.slice(0, 60)),
       chk('整张卡片没有任何内部串', !LEAK_RE.test(errSnap.text), (errSnap.text.match(LEAK_RE) || [])[0]),
-      chk('分析源 500 也只出友好灰字', boomSnap.analysisText.includes('这段暂时读不到'), boomSnap.analysisText),
-      chk('分析源 500 不泄露 HTTP 码/后端正文', !LEAK_RE.test(boomSnap.text), (boomSnap.text.match(LEAK_RE) || [])[0]),
+      chk('后端 500 不泄露 HTTP 码/后端正文', !LEAK_RE.test(boomSnap.text), (boomSnap.text.match(LEAK_RE) || [])[0]),
       chk('五个 slot 都没有裸 kind 词',
         ![boomSnap.debotText, boomSnap.thesisText, boomSnap.analysisText, boomSnap.kolText, boomSnap.tweetsText]
           .some((t) => LEAK_RE.test(t)), null),
     ]);
   }
 
-  // 关掉分析源，回公开版，回到 PONS 让 DOM 抓取段稳定
-  await page.evaluate(() => window.__setSetting({ analysisTemplate: '', detailTemplate: '' }));
+  // 回到 PONS 让 DOM 抓取段稳定
   await pushState(page, `/tokens/robinhood/${PONS_CA}`);
   await sleep(1000);
   s = await snap(page);
@@ -1455,53 +1310,24 @@ try {
   await pop.setContent(fs.readFileSync(path.join(EXT_DIR, 'popup.html'), 'utf8')
     .replace('<script src="popup.js"></script>', '<script>' + fs.readFileSync(path.join(EXT_DIR, 'popup.js'), 'utf8') + '</script>'));
   await sleep(250);
-  const popOk = await pop.evaluate(() => !!document.getElementById('analysisTemplate'));
-  step('步骤 25 · 设置面板渲染（通用 + 数据源两组）', [
-    chk('分析源模板输入框存在', popOk, popOk),
-    chk('两组标题齐全', await pop.evaluate(() => Array.from(document.querySelectorAll('.gtitle')).map((g) => g.textContent).join(',') === '通用,数据源'), null),
+  const popSurface = await pop.evaluate(() => ({
+    groups: Array.from(document.querySelectorAll('.gtitle')).map((g) => g.textContent).join(','),
+    analysis: !!document.getElementById('analysisTemplate'),
+    detail: !!document.getElementById('detailTemplate'),
+    allowPrivate: !!document.getElementById('allowPrivate'),
+    save: !!document.getElementById('save'),
+  }));
+  step('步骤 25 · 设置面板只剩通用组：自定义分析源整面不存在', [
+    chk('只有「通用」一组', popSurface.groups === '通用', popSurface.groups),
+    chk('分析源输入框不存在', popSurface.analysis === false, popSurface.analysis),
+    chk('详情页输入框不存在', popSurface.detail === false, popSurface.detail),
+    chk('高级·内网开关不存在', popSurface.allowPrivate === false, popSurface.allowPrivate),
+    chk('保存数据源按钮不存在', popSurface.save === false, popSurface.save),
   ]);
   await shot(pop, '12-settings.png');
 
-  // 设置面板同样守住"开关关只收 https 公网地址、开关开才放行 http/内网"这条线
-  const popV = await pop.evaluate(async () => {
-    const out = {};
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const setToggle = (on) => { document.getElementById('allowPrivate').checked = on; };
-    const save = async (v, ms) => {
-      document.getElementById('analysisTemplate').value = v;
-      document.getElementById('save').click();
-      await wait(ms);
-      return document.getElementById('msg').textContent;
-    };
-    // 开关关（默认）
-    setToggle(false);
-    out.noPlaceholder = await save('https://example.com/data.json', 60);
-    out.http = await save('http://example.com/{ca}.json', 60);
-    out.priv = await save('https://192.168.1.5/{ca}.json', 60);
-    out.loopback = await save('https://localhost/{ca}.json', 60);
-    out.ok = await save('https://example.com/{ca}.json', 200);
-    // 开关开
-    setToggle(true);
-    out.onHttp = await save('http://192.168.1.5/{ca}.json', 200);
-    out.onLoopback = await save('http://127.0.0.1:8899/{ca}.json', 200);
-    out.onNoPlaceholder = await save('http://192.168.1.5/data.json', 60); // 仍必须含 {ca}
-    out.onBadScheme = await save('ftp://192.168.1.5/{ca}.json', 60);       // 仍必须 http(s)
-    // 开关开也读回持久化的 toggle
-    out.persisted = await new Promise((r) => chrome.storage.sync.get({ allowPrivateAnalysisSource: false }, (s) => r(s.allowPrivateAnalysisSource)));
-    return out;
-  });
-  step('步骤 25b · 设置面板：开关关拒绝 http/内网/环回，开关开放行 http/内网', [
-    chk('缺 {ca} 被拦', popV.noPlaceholder.includes('要含 {ca}'), popV.noPlaceholder),
-    chk('开关关：http 被拦', popV.http.includes('必须是 https 公网地址'), popV.http),
-    chk('开关关：内网 IP 被拦', popV.priv.includes('必须是 https 公网地址'), popV.priv),
-    chk('开关关：localhost 被拦', popV.loopback.includes('必须是 https 公网地址'), popV.loopback),
-    chk('开关关：合规地址可保存', popV.ok.includes('已保存'), popV.ok),
-    chk('开关开：http 内网源可保存', popV.onHttp.includes('已保存'), popV.onHttp),
-    chk('开关开：http 环回源可保存', popV.onLoopback.includes('已保存'), popV.onLoopback),
-    chk('开关开：仍要求含 {ca}', popV.onNoPlaceholder.includes('要含 {ca}'), popV.onNoPlaceholder),
-    chk('开关开：ftp 之类非 http(s) 仍被拦', popV.onBadScheme.includes('http(s)'), popV.onBadScheme),
-    chk('开关状态被持久化', popV.persisted === true, popV.persisted),
-  ]);
+  // 公开版无自定义分析源，原步骤 25b（面板侧 SSRF 准入）随该能力一并移除。
+
   await shot(pop, '18-settings-advanced.png');
   await pop.close();
 
@@ -1628,7 +1454,7 @@ try {
         v1.options.join('|') === 'compact:精简展开（只显示起源+评级理由）|full:全部展开|off:不自动弹出（点右下角按钮才显示）',
         v1.options),
       chk('默认选中 compact', v1.value === 'compact', v1.value),
-      chk('两组标题仍是 通用,数据源', v1.titlesJoin === '通用,数据源', v1.titlesJoin),
+      chk('公开版只剩「通用」一组', v1.titlesJoin === '通用', v1.titlesJoin),
     ]);
     await shot(pp1, '23-settings-openmode.png');
 
@@ -1678,14 +1504,13 @@ try {
 // --- 27 静态自检：manifest 版本 / 权限面 ---
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
-  step('步骤 27 · manifest 可解析、版本 0.8.0、可选授权含 http+https（高级开关需要）', [
+  step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
     chk('版本号为 0.8.0', mf.version === '0.8.0', mf.version),
-    chk('optional_host_permissions 含 https 通配',
-      Array.isArray(mf.optional_host_permissions)
-      && mf.optional_host_permissions.indexOf('https://*/*') !== -1, mf.optional_host_permissions),
-    chk('optional_host_permissions 含 http 通配（放行内网自建源的授权前提）',
-      Array.isArray(mf.optional_host_permissions)
-      && mf.optional_host_permissions.indexOf('http://*/*') !== -1, mf.optional_host_permissions),
+    chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
+      mf.optional_host_permissions === undefined, mf.optional_host_permissions),
+    chk('permissions 只有 storage',
+      Array.isArray(mf.permissions) && mf.permissions.join(',') === 'storage', mf.permissions),
+    chk('固定公钥在位（扩展 ID 恒定）', typeof mf.key === 'string' && mf.key.length > 300, !!mf.key),
     chk('固定 host 授权仍只有 DeBot + FxTwitter 三个公网 https 源',
       Array.isArray(mf.host_permissions)
       && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*',
