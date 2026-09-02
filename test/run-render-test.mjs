@@ -2,7 +2,7 @@
  * Fomo放大镜（公开版）— 渲染回归测试
  *
  * 公开版不含「自定义分析源」：对应步骤 13~17b-2 与 25b 已随该能力移除，
- * 步骤 25/27 断言的是“设置面板只剩通用组 / 最小权限面”。
+ * 步骤 25/27 断言的是“设置面板只剩通用组 / 最小权限面”。本文件由 PORT-TESTS.sh 从内部版生成。
  *
  * 起一个本地 https 服务（自签证书 + --host-resolver-rules 把 analysis.test 指到本机）：
  * 静态托管 test/，外加 /analysis/<ca>.json 动态路由，真实跑通「分析源 URL 模板」这条路径
@@ -196,11 +196,12 @@ function chromeShim(fx) {
   let bgListener = null;
   window.chrome = {
     runtime: {
+      id: 'test-extension-id',   // v0.9：后台校验 sender.id === runtime.id
       lastError: undefined,
       onMessage: { addListener(fn) { bgListener = fn; } },
       sendMessage(msg, cb) {
         window.__debotCalls.push(msg.type + ':' + (msg.ca || (msg.ids || []).join(',')));
-        if (msg.type === 'analysis-doc' && bgListener) { bgListener(msg, {}, cb); return; } // 走真 background
+        if (msg.type === 'analysis-doc' && bgListener) { bgListener(msg, { id: 'test-extension-id' }, cb); return; } // 走真 background
         let reply;
         if (msg.type === 'debot-story') {
           if (same(msg.ca, fx.placeholderCa)) reply = { ok: true, payload: fx.placeholders.data.history };
@@ -1660,6 +1661,45 @@ try {
     await pM.close();
   }
 
+  // --- 34 (v0.9) UI 本地化：lang=en 时卡片壳全英文（老外用户主力）---
+  {
+    const PAIRS_EN = [
+      { quote: 'WETH', dex: 'uniswap', liqUsd: 4407760 },
+      { quote: 'HIMS', dex: 'uniswap', liqUsd: 2100000 },
+      { quote: 'LLY',  dex: 'giga',    liqUsd: 90000 },
+      { quote: 'NVDA', dex: 'up',      liqUsd: 50000 },
+    ];
+    const pE = await openPage({ syncSeed: { lang: 'en' }, pairs: PAIRS_EN });
+    await pushState(pE, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1300);
+    const e1 = await snap(pE);
+    const enProbe = await pE.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      return {
+        copyTitle: (sh.querySelector('.btn.copy') || {}).getAttribute('title'),
+        sortBtns: Array.from(sh.querySelectorAll('.slot-thesis .sbtn')).map((b) => b.textContent),
+        cjkInChrome: (Array.from(sh.querySelectorAll('summary, .sbtn, .tab, .rtime, .grey, .btn')).map((e) => e.textContent).join('').replace(/中/g, '').match(/[一-鿿]/g) || []).length,
+      };
+    });
+    step('步骤 34 · lang=en：段标题/排序钮/持有时长/按钮提示全英文，卡片壳无中文残留', [
+      chk('段标题英文（Origin / Rating rationale）', e1.summaries.includes('Origin') && e1.summaries.includes('Rating rationale'), e1.summaries),
+      chk('推文段英文摘要', e1.tweetsSummary.indexOf('Source tweets') === 0, e1.tweetsSummary),
+      chk('排序钮英文', enProbe.sortBtns.join('|') === 'By likes|Newest ≥2 likes', enProbe.sortBtns),
+      chk('持有时长英文（held 2d 4h）', e1.kolLines[0].includes('held 2d 4h'), e1.kolLines[0]),
+      chk('复制钮提示英文', enProbe.copyTitle === 'Copy contract address', enProbe.copyTitle),
+      chk('卡片壳（标题/按钮/灰字/标签）无中文残留（品牌名除外）', enProbe.cjkInChrome === 0, enProbe.cjkInChrome),
+      chk('DeBot 正文走英文版', e1.text.includes('non-hosted token issuance platform'), null),
+    ]);
+    await shotClip(pE, '30-en-meta.png', e1.cardRect);
+    await clickTab(pE, 'views'); await sleep(200);
+    await shotClip(pE, '31-en-thesis.png', (await snap(pE)).cardRect);
+    await clickTab(pE, 'holders'); await sleep(200);
+    await shotClip(pE, '32-en-holders.png', (await snap(pE)).cardRect);
+    await clickTab(pE, 'narrative'); await sleep(200);
+    await shot(pE, '33-en-fullpage.png');
+    await pE.close();
+  }
+
 } catch (e) {
   failures++;
   console.log('FAIL  测试执行异常:', e && e.stack ? e.stack : e);
@@ -1671,7 +1711,7 @@ try {
 
 // --- 26 私有信息门禁 ---
 {
-  const SHIPPED = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'README.md', 'PRIVACY.md', 'LICENSE'];
+  const SHIPPED = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'README.md', 'README.zh-CN.md', 'PRIVACY.md', 'LICENSE'];
   const BANNED = /黑柴|作战台|100\.121\.107\.107|second-leg|prod-api\.fomo|openclaw|home-node/i;
   const hits = [];
   for (const f of SHIPPED) {
@@ -1687,7 +1727,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.8.9', mf.version === '0.8.9', mf.version),
+    chk('版本号为 0.9.0', mf.version === '0.9.0', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',

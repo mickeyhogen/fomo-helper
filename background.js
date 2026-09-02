@@ -21,6 +21,7 @@ const API_BASES = ['https://app.debot.ai', 'https://debot.ai'];
 const API_PATH = '/api/v1/nitter/story/latest';
 const TTL_MS = 10 * 60 * 1000;
 const TIMEOUT_MS = 15000;
+const FETCH_MAX_BYTES = 2 * 1024 * 1024;   // 任何三方响应超 2MB 一律当坏包
 const SESSION_PREFIX = 'debot-story:';
 
 // FxTwitter 公开推文
@@ -102,6 +103,9 @@ async function fetchJson(url, timeoutMs) {
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return { stage: 'http', status: res.status };
+    // K3 审查 F4：上游被劫持回超大响应时别把 service worker 撑爆
+    const len = Number(res.headers.get('content-length') || 0);
+    if (len > FETCH_MAX_BYTES) return { stage: 'parse' };
     try {
       return { stage: 'json', json: await res.json() };
     } catch (_) {
@@ -260,7 +264,9 @@ async function handlePairs(msg) {
   // 只留本链、且我们这只币在场的池子；对手方 = 另一侧的 symbol。
   // 字段裁剪到最小——三方响应绝不整包透传给前端。
   const rows = [];
+  let scanned = 0;
   for (const p of out.json.pairs) {
+    if (++scanned > 400) break;   // K3 F4：超大 pairs 数组封顶遍历
     if (!p || typeof p !== 'object') continue;
     if (chain && String(p.chainId || '').toLowerCase() !== chain) continue;
     const base = p.baseToken || {};
@@ -295,7 +301,15 @@ const ROUTES = {
   'dex-pairs': handlePairs,
 };
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+const CA_SHAPE_RE = /^[A-Za-z0-9]{1,64}$/;
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // K3 审查 F1：只受理本扩展自己的 content script；其它扩展知道固定 ID 也借不到这几条代发通道
+  if (!sender || sender.id !== chrome.runtime.id) return false;
+  if (msg && 'ca' in msg && !CA_SHAPE_RE.test(String(msg.ca || ''))) {
+    sendResponse({ ok: false, kind: 'network' });
+    return false;
+  }
   const fn = msg && ROUTES[msg.type];
   if (!fn) return false;
   fn(msg).then(sendResponse).catch(() => {

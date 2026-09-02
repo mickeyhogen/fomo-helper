@@ -41,9 +41,7 @@
     openMode: 'compact',
     hoverPreview: true,
     lang: 'zh',
-    analysisTemplate: '',   // 空 = 「AI 判断」段整段不存在
-    detailTemplate: '',     // 可选：完整分析详情页
-    allowPrivateAnalysisSource: false, // 高级·仅自用：放行 http/内网 自建分析源
+    // 公开版：不含自定义分析源，相关设置键一概不读（K3 审查 F5）
   };
 
   /**
@@ -61,6 +59,69 @@
   const autoOpenEnabled = () => settings.openMode !== 'off';
 
   let settings = Object.assign({}, DEFAULTS);
+
+  // ---------- v0.9 UI 本地化 ----------
+  // 卡片壳（标题/按钮/灰字/提示）随「中/EN」一起切；DeBot 正文另有 story/story_en 双语。
+  const I18N = {
+    zh: {
+      copyCa: '复制合约地址', pin: '固定卡片', langBtn: '切换译文语言', refresh: '重新抓取', close: '关闭',
+      preview: '预览', launcher: 'Fomo放大镜：查看当前代币的叙事/观点/持仓', copied: '已复制',
+      notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
+      source: '↗ 来源', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
+      nostory: 'DeBot 还没有这只币的叙事记录', openDebot: '在 DeBot 打开 ↗', retry: '重试',
+      secOrigin: '起源', secRating: '评级理由', secSpread: '传播', secDev: '开发者',
+      fCeleb: '名人背书', fViews: '最高浏览', fLikes: '最高点赞', fComments: '最高评论', fCommunity: '社区参与', fNegative: '负面事件',
+      fIdentity: '身份', fAddress: '地址分析',
+      tabMeta: 'Meta', tabThesis: 'Thesis', tabHolders: 'Holders',
+      sortLikes: '按赞', sortTime: '最新 ≥2赞',
+      readingHolders: '读取页面持仓表…', readingTable: '读取持仓表…',
+      scrollHolders: '把页面的 Holders 表滚动到可见即可显示持仓', scrollTable: '把页面的 Holders 表滚动到可见即可显示',
+      noThesis: '持有人里暂时没有写 thesis 的',
+      friendsOn: '页面开着 Friends only 筛选——关闭它才能显示全部数据', friendsMaybe: '（若开着 Friends only 筛选，需关闭才有全量数据）',
+      feedNoLikes: '评论流里暂时没有 ≥2 赞的发言', feedMissing: '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看',
+      capNewest: '只显示最新的前 ', capLikes: '只显示点赞最高的前 ', capTail: ' 条（共 ', capEnd: ' 条）',
+      cost: '成本 ', held: '持有 ', more: ' 展开', less: ' 收起',
+      tweets: '叙事来源推文', tweetsN: '（', tweetsNEnd: ' 条）', loading: '读取中…', openTweet: '打开推文 ↗', moreTweets: '更多来源推文（',
+      pairsTitle: '流动性池报价资产（按流动性排序）',
+      trPreparing: '正在准备本地翻译（首次需下载语言包）…', trDownloading: '正在下载语言包 ', trAbsent: '此浏览器无内置翻译，只能切中/英原文',
+      trHint: '中=译成中文 · EN=显示原文（Chrome 本地翻译，数据不出浏览器）', trBusy: '翻译中…',
+      errDebot: '这段暂时读不到', errTweets: '来源推文暂时读不到',
+      aiLoading: 'AI 判断读取中…', ai: 'AI 判断', memeHook: 'meme点', techFlags: '技术 / 红旗', updatedAt: '更新于 ', fullReport: '查看完整分析 ↗',
+      stale: '（分析时点快照，市值类数字以当时为准）', tier: ' 档',
+      justNow: '刚刚', minAgo: ' 分钟前', hourAgo: ' 小时前', dayAgo: ' 天前', monthAgo: ' 个月前',
+    },
+    en: {
+      copyCa: 'Copy contract address', pin: 'Pin card', langBtn: 'Switch language', refresh: 'Refresh', close: 'Close',
+      preview: 'preview', launcher: 'Fomo Helper: narrative / theses / holders of this token', copied: 'Copied',
+      notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
+      source: '↗ source', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
+      nostory: 'DeBot has no narrative for this token yet', openDebot: 'Open on DeBot ↗', retry: 'Retry',
+      secOrigin: 'Origin', secRating: 'Rating rationale', secSpread: 'Spread', secDev: 'Developer',
+      fCeleb: 'Celebrity backing', fViews: 'Top views', fLikes: 'Top likes', fComments: 'Top comments', fCommunity: 'Community', fNegative: 'Negative events',
+      fIdentity: 'Identity', fAddress: 'Address analysis',
+      tabMeta: 'Meta', tabThesis: 'Thesis', tabHolders: 'Holders',
+      sortLikes: 'By likes', sortTime: 'Newest ≥2 likes',
+      readingHolders: 'Reading the Holders table…', readingTable: 'Reading the Holders table…',
+      scrollHolders: 'Scroll the Holders table into view to load positions', scrollTable: 'Scroll the Holders table into view to load',
+      noThesis: 'No holder has written a thesis yet',
+      friendsOn: '“Friends only” is on — turn it off to see everyone', friendsMaybe: ' (if “Friends only” is on, turn it off for the full list)',
+      feedNoLikes: 'No thesis with ≥2 likes in the feed yet', feedMissing: 'Newest reads fomo’s own Thesis feed — open that tab once so it renders, then come back',
+      capNewest: 'Showing the newest ', capLikes: 'Showing the top ', capTail: ' (of ', capEnd: ')',
+      cost: 'cost ', held: 'held ', more: ' more', less: ' less',
+      tweets: 'Source tweets', tweetsN: ' (', tweetsNEnd: ')', loading: 'Loading…', openTweet: 'Open tweet ↗', moreTweets: 'More source tweets (',
+      pairsTitle: 'Pool quote assets (by liquidity)',
+      trPreparing: 'Preparing local translation (first run downloads a language pack)…', trDownloading: 'Downloading language pack ', trAbsent: 'This browser has no built-in translation; only 中/EN originals',
+      trHint: '中 = translate to Chinese · EN = originals (Chrome on-device translation, nothing leaves the browser)', trBusy: 'Translating…',
+      errDebot: 'Temporarily unavailable', errTweets: 'Source tweets temporarily unavailable',
+      aiLoading: 'Loading AI verdict…', ai: 'AI verdict', memeHook: 'meme hook', techFlags: 'Tech / red flags', updatedAt: 'Updated ', fullReport: 'Full analysis ↗',
+      stale: '(snapshot at analysis time; market-cap figures may be stale)', tier: ' tier',
+      justNow: 'just now', minAgo: ' min ago', hourAgo: ' h ago', dayAgo: ' d ago', monthAgo: ' mo ago',
+    },
+  };
+  const tr = (k) => {
+    const L = settings.lang === 'en' ? I18N.en : I18N.zh;
+    return (k in L) ? L[k] : (I18N.zh[k] || k);
+  };
 
   const STALE_MS = 48 * 60 * 60 * 1000;
 
@@ -220,12 +281,12 @@
   // 只有这两种失败值得单独说一句（主人点两下就能修）；其余一律一句灰字
   const ANALYSIS_ERR = { 'no-permission': 'noPermission', blocked: 'blocked' };
   const FRIENDLY = {
-    debot: '这段暂时读不到',
-    analysis: '这段暂时读不到',
+    get debot() { return tr('errDebot'); },
+    get analysis() { return tr('errDebot'); },
     noPermission: '未授权访问分析源，去设置里重新保存',
     blocked: '分析源必须是 https 公网地址（不支持内网/本地地址）',
     absent: '分析源里还没有这只币',
-    tweets: '来源推文暂时读不到',
+    get tweets() { return tr('errTweets'); },
   };
 
   function safeHttps(url) {
@@ -236,11 +297,11 @@
     const t = Date.parse(iso);
     if (!isFinite(t)) return '';
     const s = Math.max(0, (Date.now() - t) / 1000);
-    if (s < 60) return '刚刚';
-    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
-    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
-    if (s < 2592000) return Math.floor(s / 86400) + ' 天前';
-    return Math.floor(s / 2592000) + ' 个月前';
+    if (s < 60) return tr('justNow');
+    if (s < 3600) return Math.floor(s / 60) + tr('minAgo');
+    if (s < 86400) return Math.floor(s / 3600) + tr('hourAgo');
+    if (s < 2592000) return Math.floor(s / 86400) + tr('dayAgo');
+    return Math.floor(s / 2592000) + tr('monthAgo');
   }
 
   function absTime(iso) {
@@ -574,10 +635,10 @@ details.tweets > summary { color: #9aa0aa; }
     // v0.7：头部不再摊开长长的合约地址，换成一个复制图标钮
     const caBtn = h('button', {
       cls: 'btn icon copy', text: '📋', attrs: { type: 'button' },
-      title: '复制合约地址', on: { click: copyCa },
+      title: tr('copyCa'), on: { click: copyCa },
     });
     const pinBtn = h('button', {
-      cls: 'btn pin', text: '📌', attrs: { type: 'button' }, title: '固定卡片',
+      cls: 'btn pin', text: '📌', attrs: { type: 'button' }, title: tr('pin'),
       on: { click: () => { state.pinned = true; state.mode = 'url'; cancelHide(); paintChrome(); } },
     });
     // v0.7：光一个 "EN" 主人看不懂在切什么 → 做成 中/EN 双档，高亮当前档。
@@ -586,18 +647,18 @@ details.tweets > summary { color: #9aa0aa; }
     const langZh = h('span', { cls: 'lg', text: '中' });
     const langEn = h('span', { cls: 'lg', text: 'EN' });
     const langSep = h('span', { cls: 'lgsep', text: '/' });
-    const langBusy = h('span', { cls: 'lg busy', text: '翻译中…' });
+    const langBusy = h('span', { cls: 'lg busy', text: tr('trBusy') });
     langBusy.hidden = true;
     const langBtn = h('button', {
-      cls: 'btn lang', attrs: { type: 'button' }, title: '切换译文语言',
+      cls: 'btn lang', attrs: { type: 'button' }, title: tr('langBtn'),
       on: { click: toggleLang },
     }, [langZh, langSep, langEn, langBusy]);
     const refreshBtn = h('button', {
-      cls: 'btn icon', text: '↻', attrs: { type: 'button' }, title: '重新抓取',
+      cls: 'btn icon', text: '↻', attrs: { type: 'button' }, title: tr('refresh'),
       on: { click: () => { if (state.ca) { load(state.ca, state.chain, state.mode, true); rescanNow(true); } } },
     });
     const closeBtn = h('button', {
-      cls: 'btn x', text: '×', attrs: { type: 'button' }, title: '关闭',
+      cls: 'btn x', text: '×', attrs: { type: 'button' }, title: tr('close'),
       on: { click: () => closeCard() },
     });
 
@@ -608,7 +669,7 @@ details.tweets > summary { color: #9aa0aa; }
     // 类型信息收进名字的悬停提示，不丢。
     const pairsWrap = h('span', { cls: 'pairs' });
     pairsWrap.hidden = true;
-    const pvChip = h('span', { cls: 'chip pv', text: '预览' });
+    const pvChip = h('span', { cls: 'chip pv', text: tr('preview') });
     const hdrTop = h('div', { cls: 'hdr-top' }, [name, pairsWrap, pvChip,
       h('span', { cls: 'spacer' }),
       h('div', { cls: 'hdr-acts' }, [caBtn, pinBtn, langBtn, refreshBtn, closeBtn])]);
@@ -637,14 +698,14 @@ details.tweets > summary { color: #9aa0aa; }
 
     const tabBtns = [];
     const tabDefs = [
-      ['narrative', 'Meta'], ['views', 'Thesis'], ['holders', 'Holders'],
+      ['narrative', 'tabMeta'], ['views', 'tabThesis'], ['holders', 'tabHolders'],
     ];
     for (const [key, label] of tabDefs) {
       const count = h('span', { cls: 'tcount' });
       const btn = h('button', {
         cls: 'tab' + (key === 'narrative' ? ' on' : ''), attrs: { type: 'button' },
         on: { click: () => switchTab(key) },
-      }, [h('span', { text: label }), count]);
+      }, [h('span', { cls: 'tlabel', text: tr(label) }), count]);
       btn.dataset.tab = key;
       tabBtns.push(btn);
     }
@@ -665,7 +726,7 @@ details.tweets > summary { color: #9aa0aa; }
     // --- 圆钮 ---
     launcher = h('button', {
       cls: 'launcher', text: '🔍', attrs: { type: 'button' },
-      title: 'Fomo放大镜：查看当前代币的叙事/观点/持仓',
+      title: tr('launcher'),
       on: { click: onLauncherClick },
     });
 
@@ -673,7 +734,7 @@ details.tweets > summary { color: #9aa0aa; }
     shadow.appendChild(launcher);
     document.documentElement.appendChild(host);
 
-    els = { name, caBtn, pinBtn, langBtn, langZh, langEn, langSep, langBusy, stars, starRow,
+    els = { name, caBtn, pinBtn, langBtn, refreshBtn, closeBtn, langZh, langEn, langSep, langBusy, stars, starRow,
             pairsWrap, pvChip, hdr, body, tabBtns,
             paneNarrative, paneViews, paneHolders,
             slotDebot, slotDebotTail, slotThesis, slotAnalysis, slotKol, slotTweets };
@@ -825,7 +886,7 @@ details.tweets > summary { color: #9aa0aa; }
   function copyCa() {
     if (!state.ca) return;
     try {
-      navigator.clipboard.writeText(state.ca).then(() => toast('已复制'), () => {});
+      navigator.clipboard.writeText(state.ca).then(() => toast(tr('copied')), () => {});
     } catch (_) { /* 忽略 */ }
   }
 
@@ -847,17 +908,40 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   /** 中英切换后：DeBot 换语言版本，thesis/推文段按新语言决定要不要自动翻。 */
+  /** 卡片壳上的静态文案（标签/按钮提示/预览角标）：建卡时设置可能还没到，每次 paintChrome 都刷一遍。 */
+  function paintStaticI18n() {
+    if (!els) return;
+    for (const b of els.tabBtns) {
+      const lb = b.querySelector('.tlabel');
+      if (lb) lb.textContent = tr({ narrative: 'tabMeta', views: 'tabThesis', holders: 'tabHolders' }[b.dataset.tab]);
+    }
+    els.caBtn.setAttribute('title', tr('copyCa'));
+    els.pinBtn.setAttribute('title', tr('pin'));
+    els.langBtn.setAttribute('title', tr('langBtn'));
+    els.refreshBtn.setAttribute('title', tr('refresh'));
+    els.closeBtn.setAttribute('title', tr('close'));
+    els.langBusy.textContent = tr('trBusy');
+    els.pvChip.textContent = tr('preview');
+    if (launcher) launcher.setAttribute('title', tr('launcher'));
+  }
+
   function applyLangChange() {
+    // v0.9：UI 壳随语言整体重绘（标签文案/段标题/灰字/按钮提示），正文段各自重画
+    paintStaticI18n();
     translation.langChanged();
     paintHeader();
+    renderPairs();
     renderDebot();
+    renderAnalysis();
     renderThesis();
+    renderKol();
     renderTweets();
   }
 
+
   function onLauncherClick() {
     if (urlToken) load(urlToken.ca, urlToken.chain, 'url', false);
-    else toast('当前页面不是代币页');
+    else toast(tr('notToken'));
   }
 
   function closeCard() {
@@ -928,6 +1012,7 @@ details.tweets > summary { color: #9aa0aa; }
       revealWhenPageReady(seq);
     }
     translation.reset();
+    if (translation.cache.size > 800) translation.cache.clear();   // K3 F3：跨代币缓存封顶
 
     paintChrome();
     paintHeader();
@@ -1018,6 +1103,7 @@ details.tweets > summary { color: #9aa0aa; }
     els.pvChip.hidden = !preview;
     els.pinBtn.hidden = !preview;
     els.caBtn.hidden = !state.ca;   // 没有地址就没什么可复制的
+    paintStaticI18n();
     paintTabs();
   }
 
@@ -1083,7 +1169,7 @@ details.tweets > summary { color: #9aa0aa; }
     if (syms.length > show.length) {
       wrap.appendChild(h('span', { cls: 'pairchip more', text: '+' + (syms.length - show.length) }));
     }
-    wrap.setAttribute('title', '流动性池报价资产（按流动性排序）\n' + rows.slice(0, 8)
+    wrap.setAttribute('title', tr('pairsTitle') + '\n' + rows.slice(0, 8)
       .map((r) => '$' + String((r && r.quote) || '?').toUpperCase()
         + ' · ' + ((r && r.dex) || '?') + ' · ' + fmtUsd(r && r.liqUsd)).join('\n'));
   }
@@ -1131,9 +1217,9 @@ details.tweets > summary { color: #9aa0aa; }
     if (hist && nonEmpty(hist.name)) name = hist.name;
     else if (story && nonEmpty(story.project_name)) name = story.project_name;
     else if (dos && nonEmpty(dos.symbol)) name = dos.symbol;
-    else if (state.status === 'loading') name = '载入中…';
-    else if (state.status === 'nostory') name = '未收录代币';
-    else if (state.status === 'error') name = '读取失败';
+    else if (state.status === 'loading') name = tr('loadingName');
+    else if (state.status === 'nostory') name = tr('nostoryName');
+    else if (state.status === 'error') name = tr('errorName');
     els.name.textContent = name || shortCa(state.ca);
 
     // v0.7.3：中/EN 钮既切 DeBot 双语版本，又是唯一的翻译开关。所以它在
@@ -1181,7 +1267,7 @@ details.tweets > summary { color: #9aa0aa; }
     const ref = safeHttps(obj.ref);
     if (ref) {
       row.appendChild(h('a', {
-        cls: 'ref', text: '↗ 来源', href: ref, title: ref,
+        cls: 'ref', text: tr('source'), href: ref, title: ref,
         attrs: { target: '_blank', rel: 'noopener noreferrer' },
       }));
     }
@@ -1215,7 +1301,7 @@ details.tweets > summary { color: #9aa0aa; }
       body.textContent = '';
       body.appendChild(h('div', { cls: 'state' }, [
         h('div', { cls: 'spin' }),
-        h('span', { text: '正在读取 DeBot 叙事…' }),
+        h('span', { text: tr('loadingStory') }),
       ]));
       return;
     }
@@ -1237,41 +1323,41 @@ details.tweets > summary { color: #9aa0aa; }
 
     // 起源（默认展开）
     const bg = story.background || {};
-    add(sectionNode('起源', [fieldNode('', bg.origin)]));
+    add(sectionNode(tr('secOrigin'), [fieldNode('', bg.origin)]));
 
     // 评级理由（默认展开）。位置排在起源之后，但仍保留蓝色高亮框——
     // 它是全段唯一的"判断"，视觉权重不能因为排第二就掉下去。
     // 被个人模式挡住的只有头部那排星星——分数是主观的，理由不是。
     const rating = story.rating || {};
     if (hasContent(rating.reason)) {
-      add(sectionNode('评级理由',
+      add(sectionNode(tr('secRating'),
         [h('div', { cls: 'txt', text: rating.reason.trim() })], 'rating'));
     }
 
     // 传播（六项全是占位词时，sectionNode 会让整段消失）。
     // 精简布局默认收起；full 布局跟着"全部展开"一起摊开。
     const dist = story.distribution || {};
-    addTail(sectionNode('传播', [
-      fieldNode('名人背书', dist.celebrity_support),
-      fieldNode('最高浏览', dist.max_views),
-      fieldNode('最高点赞', dist.max_likes),
-      fieldNode('最高评论', dist.max_comments),
-      fieldNode('社区参与', dist.community_participation),
-      fieldNode('负面事件', dist.negative_incidents),
+    addTail(sectionNode(tr('secSpread'), [
+      fieldNode(tr('fCeleb'), dist.celebrity_support),
+      fieldNode(tr('fViews'), dist.max_views),
+      fieldNode(tr('fLikes'), dist.max_likes),
+      fieldNode(tr('fComments'), dist.max_comments),
+      fieldNode(tr('fCommunity'), dist.community_participation),
+      fieldNode(tr('fNegative'), dist.negative_incidents),
     ], '', state.compact));
 
     // 开发者：只有命中风险/强信号关键词的文字行才占版面；两行都不命中 → 整段不出现。
     // （v0.5 起不再显示 fomo 开发者战绩——那需要被 CF 挡掉的 API，开源版拿不到。）
     const dev = story.developer_info || {};
-    addTail(sectionNode('开发者', [
-      devWorthShowing(dev.identity && dev.identity.text) ? fieldNode('身份', dev.identity) : null,
+    addTail(sectionNode(tr('secDev'), [
+      devWorthShowing(dev.identity && dev.identity.text) ? fieldNode(tr('fIdentity'), dev.identity) : null,
       devWorthShowing(dev.address_analysis && dev.address_analysis.text)
-        ? fieldNode('地址分析', dev.address_analysis) : null,
+        ? fieldNode(tr('fAddress'), dev.address_analysis) : null,
     ], '', state.compact));
 
     if (!body.childNodes.length && !tail.childNodes.length) {
       body.appendChild(h('div', { cls: 'state' },
-        [h('span', { text: '这条叙事记录里没有可展示的内容' })]));
+        [h('span', { text: tr('emptyStory') })]));
     }
   }
 
@@ -1279,9 +1365,9 @@ details.tweets > summary { color: #9aa0aa; }
     els.slotDebot.textContent = '';
     els.slotDebotTail.textContent = '';
     els.slotDebot.appendChild(h('div', { cls: 'state' }, [
-      h('span', { cls: 'em', text: 'DeBot 还没有这只币的叙事记录' }),
+      h('span', { cls: 'em', text: tr('nostory') }),
       h('a', {
-        cls: 'ref', text: '在 DeBot 打开 ↗', href: debotUrl(state.chain, state.ca),
+        cls: 'ref', text: tr('openDebot'), href: debotUrl(state.chain, state.ca),
         attrs: { target: '_blank', rel: 'noopener noreferrer' },
       }),
     ]));
@@ -1293,7 +1379,7 @@ details.tweets > summary { color: #9aa0aa; }
     els.slotDebot.appendChild(h('div', { cls: 'state' }, [
       h('span', { cls: 'em', text: FRIENDLY.debot }),
       h('button', {
-        cls: 'btn', text: '重试', attrs: { type: 'button' },
+        cls: 'btn', text: tr('retry'), attrs: { type: 'button' },
         on: { click: () => load(state.ca, state.chain, state.mode, true) },
       }),
     ]));
@@ -1412,12 +1498,12 @@ details.tweets > summary { color: #9aa0aa; }
       if (els.langSep) els.langSep.hidden = busy;
       if (busy) {
         els.langBtn.setAttribute('title', this.progress == null
-          ? '正在准备本地翻译（首次需下载语言包）…'
-          : '正在下载语言包 ' + this.progress + '%');
+          ? tr('trPreparing')
+          : tr('trDownloading') + this.progress + '%');
       } else if (this.status === 'absent') {
-        els.langBtn.setAttribute('title', '此浏览器无内置翻译，只能切中/英原文');
+        els.langBtn.setAttribute('title', tr('trAbsent'));
       } else {
-        els.langBtn.setAttribute('title', '中=译成中文 · EN=显示原文（Chrome 本地翻译，数据不出浏览器）');
+        els.langBtn.setAttribute('title', tr('trHint'));
       }
     },
 
@@ -1819,8 +1905,8 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   /** 持仓表：抓每一行含 "avg. hold" 的块，解析 handle/仓位/入场价/盈亏，按仓位取前 6。 */
-  function scrapeHolders() {
-    const rowEls = collectHolderRows();
+  function scrapeHolders(rowElsIn) {
+    const rowEls = rowElsIn || collectHolderRows();
     if (!rowEls.length) return [];
     const rows = parseHoldersGuarded(rowEls).slice();
     rows.sort((a, b) => moneyValue(b.positionUsd) - moneyValue(a.positionUsd));
@@ -2050,8 +2136,8 @@ details.tweets > summary { color: #9aa0aa; }
     return out;
   }
 
-  function scrapeThesis() {
-    const rowEls = collectHolderRows();
+  function scrapeThesis(rowElsIn) {
+    const rowEls = rowElsIn || collectHolderRows();
     if (!rowEls.length) return { rows: [], general: false };
     const col = findThesisColumn();
 
@@ -2142,9 +2228,9 @@ details.tweets > summary { color: #9aa0aa; }
 
   /** 空态文案：确认开着 Friends only → 直说原因；判不出 → 带一句提醒；确认没开 → 原文案。 */
   function emptyScrapeHint(base, friendsOnly) {
-    if (friendsOnly === true) return '页面开着 Friends only 筛选——关闭它才能显示全部数据';
+    if (friendsOnly === true) return tr('friendsOn');
     if (friendsOnly === false) return base;
-    return base + '（若开着 Friends only 筛选，需关闭才有全量数据）';
+    return base + tr('friendsMaybe');
   }
 
   /** 抓取结果指纹：状态+数据一致就跳过重渲染（防阅读中闪烁/滚动跳动/翻译重跑，K3 审查建议）。 */
@@ -2162,15 +2248,18 @@ details.tweets > summary { color: #9aa0aa; }
     const prevHolders = state.holders;
     const prevThesis = state.thesis;
 
+    // K3 审查 F2：一轮只扫一遍 Holders 表，holders/thesis 共用（原先各扫一遍 + 列头再扫一遍）
+    let rowEls = [];
+    try { rowEls = collectHolderRows(); } catch (_) { rowEls = []; }
     let holders = [];
-    try { holders = scrapeHolders(); } catch (_) { holders = []; }
+    try { holders = scrapeHolders(rowEls); } catch (_) { holders = []; }
 
     // v0.7.4：thesis 改读同一张 Holders 表的 "Thesis" 列。空态要分清两种情形——
     // 表压根没渲染出来（懒加载）→ 提示滚动 Holders 表；表在但没人写 thesis → 另一句话。
     // 用是否抓到 holder 行来判定（thesis 与 KOL 共用 collectHolderRows，同表同源）。
     const holdersPresent = holders.length > 0;
     let th = { rows: [], general: false };
-    try { th = scrapeThesis(); } catch (_) { th = { rows: [], general: false }; }
+    try { th = scrapeThesis(rowEls); } catch (_) { th = { rows: [], general: false }; }
 
     // 任一为空才需要侦测 Friends only（空态提示用；两个空态共用同一次侦测结果）
     const friendsOnly = (holders.length && th.rows.length) ? null : friendsOnlyActive();
@@ -2188,6 +2277,8 @@ details.tweets > summary { color: #9aa0aa; }
         ? Object.assign({}, prevThesis, feed.length ? { feed } : null)
         : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, feed });
 
+    if (state.holders.status === 'ready' && state.thesis.status === 'ready' && feed.length) stopScrapers();
+
     const hFp = scrapeFingerprint(state.holders);
     const tFp = scrapeFingerprint(state.thesis);
     if (hFp !== state.scrapeFp.holders) { state.scrapeFp.holders = hFp; renderKol(); }
@@ -2203,7 +2294,7 @@ details.tweets > summary { color: #9aa0aa; }
       scrapeObserver = new MutationObserver(() => {
         if (seq !== state.seq) { stopScrapers(); return; }
         if (observerDebounce) clearTimeout(observerDebounce);
-        observerDebounce = setTimeout(run, 250);
+        observerDebounce = setTimeout(run, 600);   // K3 F2：250→600ms，价格跳动别把主线程打成筛子
       });
       if (document.body) scrapeObserver.observe(document.body, { childList: true, subtree: true });
       // 主人切到 Holders/Feed 标签往往在开卡十几秒后，6 秒就撤观察者会白等；
@@ -2278,7 +2369,7 @@ details.tweets > summary { color: #9aa0aa; }
     if (st.status === 'disabled' || st.status === 'idle') return;
 
     if (st.status === 'loading') {
-      slot.appendChild(h('div', { cls: 'grey', text: 'AI 判断读取中…' }));
+      slot.appendChild(h('div', { cls: 'grey', text: tr('aiLoading') }));
       return;
     }
     if (st.status === 'absent') {
@@ -2301,7 +2392,7 @@ details.tweets > summary { color: #9aa0aa; }
     if (stale) box.classList.add('stale');
 
     box.appendChild(h('div', { cls: 'sechead' },
-      [h('span', { cls: 'sectitle', text: 'AI 判断' })]));
+      [h('span', { cls: 'sectitle', text: tr('ai') })]));
 
     if (nonEmpty(v.oneLiner)) {
       box.appendChild(h('div', { cls: 'oneliner', text: v.oneLiner.trim() }));
@@ -2310,7 +2401,7 @@ details.tweets > summary { color: #9aa0aa; }
     // meme 点：这币的梗到底是什么。自家/自配中文内容，不进翻译登记。
     if (nonEmpty(nar.memeHook)) {
       const row = h('div', { cls: 'kv memehook' });
-      row.appendChild(h('span', { cls: 'k', text: 'meme点' }));
+      row.appendChild(h('span', { cls: 'k', text: tr('memeHook') }));
       row.appendChild(textBlock(nar.memeHook.trim(), false, MEME_CLAMP));
       box.appendChild(row);
     }
@@ -2338,7 +2429,7 @@ details.tweets > summary { color: #9aa0aa; }
     const worst = worstFlag(sec);
     if (nonEmpty(tech.status) || Object.keys(sec).length) {
       const techLabel = nonEmpty(tech.status) ? (techMap[tech.status] || tech.status) : '未知';
-      box.appendChild(kv('技术 / 红旗',
+      box.appendChild(kv(tr('techFlags'),
         techLabel + ' · 红旗 ' + worst,
         worst === '无红旗' ? 'ok-line' : 'flags',
         nonEmpty(tech.detail) ? clip(tech.detail, 220) : ''));
@@ -2346,22 +2437,22 @@ details.tweets > summary { color: #9aa0aa; }
 
     // meta：更新时间 +（配了详情模板才有的）完整分析链接
     const meta = h('div', { cls: 'dmeta' });
-    if (nonEmpty(d.mode)) meta.appendChild(h('span', { text: String(d.mode).trim() + ' 档' }));
+    if (nonEmpty(d.mode)) meta.appendChild(h('span', { text: String(d.mode).trim() + tr('tier') }));
     if (nonEmpty(d.updatedAt)) {
-      meta.appendChild(h('span', { text: '更新于 ' + relTime(d.updatedAt), title: absTime(d.updatedAt) }));
+      meta.appendChild(h('span', { text: tr('updatedAt') + relTime(d.updatedAt), title: absTime(d.updatedAt) }));
     }
     const detail = buildFromTemplate(settings.detailTemplate, state.ca);
     if (detail) {
       meta.appendChild(h('span', { cls: 'spacer' }));
       meta.appendChild(h('a', {
-        text: '查看完整分析 ↗', href: detail,
+        text: tr('fullReport'), href: detail,
         attrs: { target: '_blank', rel: 'noopener noreferrer' },
       }));
     }
     if (meta.childNodes.length) box.appendChild(meta);
 
     if (stale) {
-      box.appendChild(h('div', { cls: 'muted', text: '（分析时点快照，市值类数字以当时为准）' }));
+      box.appendChild(h('div', { cls: 'muted', text: tr('stale') }));
     }
     slot.appendChild(box);
   }
@@ -2380,12 +2471,12 @@ details.tweets > summary { color: #9aa0aa; }
 
     if (st.status === 'scanning' || st.status === 'idle') {
       // 首扫多半空，别急着显示灰字；等重扫。仍占位一行淡字。
-      body.appendChild(h('div', { cls: 'grey', text: '读取页面持仓表…' }));
+      body.appendChild(h('div', { cls: 'grey', text: tr('readingHolders') }));
       return;
     }
     if (!rows.length) {
       body.appendChild(h('div', { cls: 'grey',
-        text: emptyScrapeHint('把页面的 Holders 表滚动到可见即可显示持仓', st.friendsOnly) }));
+        text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly) }));
       return;
     }
 
@@ -2393,7 +2484,7 @@ details.tweets > summary { color: #9aa0aa; }
     // 成本撤出行内（挤到换行了），收进整行的悬停提示；代币数量照旧不显示。
     for (const r of rows) {
       const item = h('div', { cls: 'row-item' });
-      if (nonEmpty(r.avgEntry)) item.setAttribute('title', '成本 ' + r.avgEntry);
+      if (nonEmpty(r.avgEntry)) item.setAttribute('title', tr('cost') + r.avgEntry);
       const rh = h('div', { cls: 'rhead' });
       const dot = () => h('span', { cls: 'sep', text: '·' });
       // 认不出作者就整个 chip 不出现，绝不编一个"@匿名"糊弄主人
@@ -2408,7 +2499,7 @@ details.tweets > summary { color: #9aa0aa; }
       // v0.8.4：持仓时长回归显示（主人 2026-09-02 要求；v0.7 曾按要求去掉）
       if (nonEmpty(r.avgHold)) {
         rh.appendChild(dot());
-        rh.appendChild(h('span', { cls: 'rtime', text: '持有 ' + r.avgHold }));
+        rh.appendChild(h('span', { cls: 'rtime', text: tr('held') + r.avgHold }));
       }
       item.appendChild(rh);
       body.appendChild(item);
@@ -2470,7 +2561,7 @@ details.tweets > summary { color: #9aa0aa; }
       }
       if (full.length > limit) {
         wrap.appendChild(h('button', {
-          cls: 'more', text: expanded ? ' 收起' : ' 展开', attrs: { type: 'button' },
+          cls: 'more', text: expanded ? tr('less') : tr('more'), attrs: { type: 'button' },
           on: { click: () => { expanded = !expanded; paint(); } },
         }));
       }
@@ -2539,14 +2630,14 @@ details.tweets > summary { color: #9aa0aa; }
     setTabCount('views', rows.length);
 
     if (st.status === 'scanning' || st.status === 'idle') {
-      body.appendChild(h('div', { cls: 'grey', text: '读取持仓表…' }));
+      body.appendChild(h('div', { cls: 'grey', text: tr('readingTable') }));
       return;
     }
     if (!rows.length) {
       // 表在但没人写 thesis → 一句话；表压根没渲染（懒加载）→ 与持仓者同一句"滚到可见"
       body.appendChild(h('div', { cls: 'grey', text: emptyScrapeHint(st.holdersPresent
-        ? '持有人里暂时没有写 thesis 的'
-        : '把页面的 Holders 表滚动到可见即可显示', st.friendsOnly) }));
+        ? tr('noThesis')
+        : tr('scrollTable'), st.friendsOnly) }));
       return;
     }
 
@@ -2556,7 +2647,7 @@ details.tweets > summary { color: #9aa0aa; }
       on: { click: () => { if (state.thesisSort !== key) { state.thesisSort = key; renderThesis(); } } },
     });
     body.appendChild(h('div', { cls: 'sortrow' },
-      [sortBtn('likes', '按赞'), sortBtn('time', '最新 ≥2赞')]));
+      [sortBtn('likes', tr('sortLikes')), sortBtn('time', tr('sortTime'))]));
 
     // 最新档（v0.8.9 重做）：数据源直接换成 fomo 自家评论流——它天生带时间/正文/点赞/持仓，
     // 且"最新"本来就该看它；按赞档继续用 Holders 表全量。评论流只渲染最新一段，没开过
@@ -2571,8 +2662,8 @@ details.tweets > summary { color: #9aa0aa; }
       if (!shown.length) {
         body.appendChild(h('div', { cls: 'grey',
           text: feed.length
-            ? '评论流里暂时没有 ≥2 赞的发言'
-            : '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看' }));
+            ? tr('feedNoLikes')
+            : tr('feedMissing') }));
         rescanNow();   // 主人多半刚开完评论页切回来，顺手补扫一次
         return;
       }
@@ -2600,8 +2691,8 @@ details.tweets > summary { color: #9aa0aa; }
     // 角标报的是真实条数；超上限时明说截断了，不许"看着像全量"
     if (shown.length > THESIS_TAB_SHOW) {
       body.appendChild(h('div', { cls: 'muted',
-        text: (state.thesisSort === 'time' ? '只显示最新的前 ' : '只显示点赞最高的前 ')
-          + THESIS_TAB_SHOW + ' 条（共 ' + shown.length + ' 条）' }));
+        text: (state.thesisSort === 'time' ? tr('capNewest') : tr('capLikes'))
+          + THESIS_TAB_SHOW + tr('capTail') + shown.length + tr('capEnd') }));
     }
     refreshLangBtn();
     translation.autoEnable();
@@ -2625,11 +2716,11 @@ details.tweets > summary { color: #9aa0aa; }
     det.addEventListener('toggle', () => { state.tweetsOpen = det.open; });
     det.appendChild(h('summary', {
       cls: 'sectitle',
-      text: '叙事来源推文' + (total ? '（' + total + ' 条）' : ''),
+      text: tr('tweets') + (total ? tr('tweetsN') + total + tr('tweetsNEnd') : ''),
     }));
 
     if (st.status === 'loading') {
-      det.appendChild(h('div', { cls: 'grey', text: '读取中…' }));
+      det.appendChild(h('div', { cls: 'grey', text: tr('loading') }));
       slot.appendChild(det);
       return;
     }
@@ -2648,7 +2739,7 @@ details.tweets > summary { color: #9aa0aa; }
       }
       rh.appendChild(h('span', { cls: 'spacer' }));
       rh.appendChild(h('a', {
-        cls: 'rlink', text: '打开推文 ↗',
+        cls: 'rlink', text: tr('openTweet'),
         href: safeHttps(t.url) || ('https://x.com/i/status/' + t.id),
         attrs: { target: '_blank', rel: 'noopener noreferrer' },
       }));
@@ -2662,7 +2753,7 @@ details.tweets > summary { color: #9aa0aa; }
     const rest = st.data.slice(TWEET_SHOW);
     if (rest.length) {
       const more = h('details', { cls: 'more-block' },
-        [h('summary', { text: '更多来源推文（' + rest.length + '）' })]);
+        [h('summary', { text: tr('moreTweets') + rest.length + ')' })]);
       rest.forEach((t) => more.appendChild(tweetRow(t)));
       det.appendChild(more);
     }
