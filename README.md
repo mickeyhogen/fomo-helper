@@ -6,7 +6,7 @@ A Chrome extension for [fomo.family](https://fomo.family). Open any token page a
 
 [Guide](https://hogen.pro/fomo-helper) · [Download](https://github.com/mickeyhogen/fomo-helper/releases/latest) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · [@0xHogen](https://x.com/0xHogen)
 
-![card](docs/assets/real-hero.png)
+![card](test/screenshots/33-en-fullpage.png)
 
 ## How to use
 

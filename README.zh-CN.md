@@ -6,7 +6,7 @@
 
 [图文说明](https://hogen.pro/fomo-helper) · [下载](https://github.com/mickeyhogen/fomo-helper/releases/latest) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · [@0xHogen](https://x.com/0xHogen)
 
-![卡片](docs/assets/real-hero.png)
+![卡片](test/screenshots/01-public-docked.png)
 
 ## 使用说明
 
