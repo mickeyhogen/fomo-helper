@@ -8,7 +8,7 @@ VER=$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])
 TMP=$(mktemp -d)
 STAGE="$TMP/fomo-narrative-lens"
 mkdir -p "$STAGE" dist
-cp manifest.json content.js background.js popup.html popup.js LICENSE "$STAGE/"
+cp manifest.json content.js background.js popup.html popup.js LICENSE PRIVACY.md README.md "$STAGE/"
 cp -r icons "$STAGE/icons"
 OUT="$PWD/dist/fomo-narrative-lens-v${VER}.zip"
 rm -f "$OUT"

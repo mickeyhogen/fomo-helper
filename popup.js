@@ -87,6 +87,8 @@ function isPublicHostname(hostRaw) {
   if (!host) return false;
   if (host === 'localhost' || host.endsWith('.localhost')) return false;
   if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
+  // 与 background.js 权威实现保持一致：IPv6 字面量一律不当分析源
+  if (host.indexOf(':') !== -1) return false;
   if (host.indexOf(':') !== -1) return false;
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (m) {
@@ -97,6 +99,9 @@ function isPublicHostname(hostRaw) {
     if (p[0] === 192 && p[1] === 168) return false;
     if (p[0] === 169 && p[1] === 254) return false;
     if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return false;
+    if (p[0] === 198 && p[1] >= 18 && p[1] <= 19) return false;
+    if (p[0] === 192 && p[1] === 0 && p[2] === 0) return false;
+    if (p[0] === 192 && p[1] === 88 && p[2] === 99) return false;
     if (p[0] >= 224) return false;
     return true;
   }
@@ -121,6 +126,7 @@ function originOf(value, needsPlaceholder, allowPrivate) {
     return u.origin;
   }
   if (u.protocol !== 'https:' || !isPublicHostname(u.hostname)) return false;
+  if (u.username || u.password) return false;   // 与 background 一致：不收内嵌凭据
   return u.origin;
 }
 

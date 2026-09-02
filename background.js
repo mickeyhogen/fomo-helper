@@ -110,6 +110,9 @@ function isPublicHostname(hostRaw) {
     if (p[0] === 192 && p[1] === 168) return false;                          // 私有 C
     if (p[0] === 169 && p[1] === 254) return false;                          // 链路本地
     if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return false;             // CGNAT / 组网内网段
+    if (p[0] === 198 && p[1] >= 18 && p[1] <= 19) return false;              // 基准测试段 198.18/15
+    if (p[0] === 192 && p[1] === 0 && p[2] === 0) return false;              // IETF 协议分配 192.0.0/24
+    if (p[0] === 192 && p[1] === 88 && p[2] === 99) return false;            // 已废弃 6to4 anycast
     if (p[0] >= 224) return false;                                           // 组播 / 保留
     return true;
   }
@@ -122,14 +125,16 @@ function isPublicHttpsUrl(url) {
   let u;
   try { u = new URL(url); } catch (_) { return false; }
   if (u.protocol !== 'https:') return false;
+  if (u.username || u.password) return false;   // URL 内嵌凭据一律不收
   return isPublicHostname(u.hostname);
 }
 
 /** 开关打开时的最低准入：仍必须是 http/https，绝不放行 file:/ftp:/data: 之类。 */
 function isHttpLikeUrl(url) {
   try {
-    const p = new URL(url).protocol;
-    return p === 'http:' || p === 'https:';
+    const u = new URL(url);
+    if (u.username || u.password) return false;  // 内嵌凭据在高级开关下同样不收
+    return u.protocol === 'http:' || u.protocol === 'https:';
   } catch (_) { return false; }
 }
 
@@ -210,6 +215,8 @@ async function fetchJson(url, timeoutMs) {
       signal: ctrl.signal,
       credentials: 'omit',
       cache: 'no-store',
+      // 准入校验只作用于初始 URL；跟随跳转会让校验被绕过(含 https→http 降级)，故一律不跟随。
+      redirect: 'error',
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return { stage: 'http', status: res.status };
