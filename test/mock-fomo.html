@@ -177,7 +177,9 @@
     <div class="ca">0x39dbed3a2bd333467115de45665cc57f813c4571 · 复制</div>
   </div>
   <div id="chart">CHART</div>
-  <label id="filter-friends"><input type="checkbox" id="friends-toggle"> Friends only</label>
+  <!-- 线上这排筛选在 Holders 表右上（x≈850），故意放到停靠卡片右侧之外，才测得到真鼠标点击 -->
+  <label id="filter-friends" style="margin-left:420px"><input type="checkbox" id="friends-toggle"> Friends only</label>
+  <div id="pointer-block" style="cursor:pointer; display:inline-block; padding:4px 8px;"><span style="pointer-events:none">Sort ▾</span></div>
   <div id="holders">
     <div class="holders-title">Holders (128)</div>
     <!-- 诱饵③：线上 Holders 表列头最后一列就叫 Thesis -->

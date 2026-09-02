@@ -1,3 +1,6 @@
+/*! Fomo放大镜 · Fomo Helper — © 2026 0xHogen (https://x.com/0xHogen)
+ *  Source: https://github.com/mickeyhogen/fomo-helper · MIT License
+ *  Derivative builds: keep this notice and the visible "By @0xHogen" attribution. */
 /**
  * 设置面板（公开版）。
  *

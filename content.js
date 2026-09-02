@@ -1,3 +1,6 @@
+/*! Fomo放大镜 · Fomo Helper — © 2026 0xHogen (https://x.com/0xHogen)
+ *  Source: https://github.com/mickeyhogen/fomo-helper · MIT License
+ *  Derivative builds: keep this notice and the visible "By @0xHogen" attribution. */
 /**
  * Fomo放大镜 — content script
  *
@@ -716,7 +719,10 @@ details.tweets > summary { color: #9aa0aa; }
     const byfoot = h('div', { cls: 'byfoot' }, [
       h('span', { text: 'By ' }),
       h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
-        attrs: { target: '_blank', rel: 'noopener noreferrer' } }),
+        attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo放大镜 · Fomo Helper — by @0xHogen' } }),
+      h('span', { text: ' · ' }),
+      h('a', { text: 'GitHub', href: 'https://github.com/mickeyhogen/fomo-helper',
+        attrs: { target: '_blank', rel: 'noopener noreferrer', title: '源码 / 反馈 · Source / Issues' } }),
     ]);
     card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot]);
     card.hidden = true;
@@ -3012,8 +3018,30 @@ details.tweets > summary { color: #9aa0aa; }
       if (fastSwitchFromClick(t)) return;
       if (previewRow && previewRow.contains && previewRow.contains(t)) return;
       if (resolveHovered(t, e.clientX)) return; // 左栏可解析成代币的行
+      // v0.9.1：点的是页面上的控件（Friends only 勾选框、筛选/排序按钮、外链…）= 用户在操作
+      // fomo，不是在"点卡外关卡"。主人实测：点 Holders 表上方的 Friends only 卡片直接消失。
+      // 只有点空白/图表这类非交互区才算主动关卡。
+      if (isPageControl(t)) return;
     } catch (_) { /* 解析失败就按"外部点击"处理 */ }
     closeCard();
+  }
+
+  /**
+   * 页面控件判定：按钮/输入/label/链接/ARIA 控件，或 4 层祖先内有 cursor:pointer
+   * （fomo 的可点区块多是 div.cursor-pointer 包一个 pointer-events-none 的图标按钮）。
+   */
+  const CONTROL_SEL = 'button, input, select, textarea, label, a, summary, '
+    + '[role="button"], [role="checkbox"], [role="switch"], [role="tab"], [role="menuitem"], '
+    + '[role="option"], [role="radio"], [contenteditable="true"]';
+  function isPageControl(t) {
+    if (!t || !t.closest) return false;
+    if (t.closest(CONTROL_SEL)) return true;
+    let el = t;
+    for (let i = 0; i < 4 && el && el.nodeType === 1 && el !== document.body; i++) {
+      try { if (getComputedStyle(el).cursor === 'pointer') return true; } catch (_) { return false; }
+      el = el.parentElement;
+    }
+    return false;
   }
 
   // ---------- 键盘 ----------

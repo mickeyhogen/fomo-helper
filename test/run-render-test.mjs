@@ -1275,10 +1275,36 @@ try {
     await sleep(200);
     const afterRow = await snap(page);
 
+    // ②b (v0.9.1) 点页面控件（Friends only 勾选框 / 任何 cursor:pointer 的可点区块）不该关——
+    //     主人实测：点 Holders 上方的 Friends only 卡片直接消失，得刷新才回来。
+    // 真鼠标点勾选框本体；若它被停靠的卡片压住，先把页面滚一下让它露出来（卡片是 fixed 的）
+    const geo = await page.evaluate(() => {
+      const b = document.getElementById('friends-toggle').getBoundingClientRect();
+      const host = document.querySelector('div[data-fomo-debot]');
+      const ep = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      const card = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2, covered: ep === host, card: [card.left, card.top, card.right, card.bottom] };
+    });
+    await page.mouse.click(geo.x, geo.y);
+    await sleep(250);
+    const afterFriends = await snap(page);
+    const friendsChecked = await page.evaluate(() => !!document.getElementById('friends-toggle').checked);
+    await page.mouse.click(geo.x, geo.y);           // 复位，别影响后面步骤
+    await sleep(150);
+    await page.click('#pointer-block');
+    await sleep(250);
+    const afterPointerBlock = await snap(page);
+
     // ③ 点图表区（卡片外）应当关闭
     await page.mouse.click(900, 400);
     await sleep(200);
     const afterOutside = await snap(page);
+
+    step('步骤 24b-1 · 点页面控件不关卡（Friends only 勾选框 / cursor:pointer 区块）', [
+      chk('点 Friends only 后卡片仍在', afterFriends.visible === true, afterFriends.visible),
+      chk('勾选框确实被点到了（没被卡片压住）', friendsChecked === true && geo.covered === false, [friendsChecked, geo]),
+      chk('点 cursor:pointer 的 div 也不关', afterPointerBlock.visible === true, afterPointerBlock.visible),
+    ]);
 
     step('步骤 24b · 点卡片外关闭；点卡片内/左栏行/圆钮不关', [
       chk('点卡片内部不关', afterInside.visible === true, afterInside.visible),
@@ -1727,7 +1753,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.0', mf.version === '0.9.0', mf.version),
+    chk('版本号为 0.9.1', mf.version === '0.9.1', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
