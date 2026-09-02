@@ -1,6 +1,6 @@
 # Fomo放大镜
 
-**[图文说明与安装页](https://mickey-hogen.github.io/fomo-magnifier/)** · [下载最新版](https://github.com/mickey-hogen/fomo-magnifier/releases/latest) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · 作者 [@0xhogen](https://x.com/0xhogen)
+**[图文说明与安装页](https://mickey-hogen.github.io/fomo-magnifier/)** · [下载最新版](https://github.com/mickey-hogen/fomo-magnifier/releases/latest) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · twitter: [@0xHogen](https://x.com/0xHogen)
 
 一个 Chrome 扩展。在 [fomo.family](https://fomo.family) 上浏览代币时，把散落在四处的信息
 聚成一张浮动卡片，回答两个问题：**这币的叙事是什么，社区在拿什么理由持仓。**
@@ -281,6 +281,6 @@ node test/run-render-test.mjs
 
 ---
 
-## 作者与许可
+## 许可
 
-作者 [@0xhogen](https://x.com/0xhogen)。MIT，全文见 [LICENSE](LICENSE)。
+MIT，全文见 [LICENSE](LICENSE)。twitter: [@0xHogen](https://x.com/0xHogen)
