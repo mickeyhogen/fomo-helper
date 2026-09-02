@@ -1,0 +1,243 @@
+{
+ "code": 0,
+ "data": {
+  "history": {
+   "id": "6a911b0b614f00a3df6c7dd2",
+   "name": "PONS",
+   "ca_address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+   "story": {
+    "project_name": "PONS",
+    "contract_address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "background": {
+     "origin": {
+      "text": "PONS 定位为 Robinhood Chain 生态首个非托管代币发射平台，叙事核心为去中心化发币基础设施。视觉符号为极简玻璃质感字母 P，强调透明与未来感。",
+      "ref": ""
+     }
+    },
+    "narrative_type": "项目类",
+    "distribution": {
+     "celebrity_support": {
+      "text": "暂无明确高知名度公众人物直接背书证据，多为社区 KOL 自发传播。",
+      "ref": ""
+     },
+     "max_views": {
+      "text": "单条推文最高浏览量约 60,760 次，显示一定社区关注度。",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "单条推文最高点赞数 204 次，互动集中在中文区及早期支持者。",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "单条推文最高评论数 76 条，讨论多围绕监控工具及早期入场机会。",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "持有者门户开启空投申领活动，引发持币地址自查与链上交互热潮。",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "部分推文提及 NoxaFun 诈骗事件作为对比，强调 PONS 安全性，无直接负面实锤。",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "团队匿名，通过推特账号 @ponsdotfamily 发布 V2 更新及股票配对发币功能。",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "部署者曾转移所有权并承诺用 WETH 手续费回购销毁代币，行为偏向建设型。",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "社区推文提及市值曾达 4700 万至 1 亿美元区间，数据需链上实时核验。",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "PUMP",
+      "address": "",
+      "reason": "同为代币发射平台赛道，PUMP 市值规模较大，具备参考性。",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "4",
+     "reason": "绑定 Robinhood 热点生态，具备基础设施叙事与空投催化。社区互动活跃但缺乏顶级名人效应，需关注 V2 功能落地后的实际采用率。"
+    }
+   },
+   "story_en": {
+    "project_name": "PONS",
+    "contract_address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "background": {
+     "origin": {
+      "text": "PONS is positioned as the first non-hosted token issuance platform in the Robinhood Chain ecosystem, with its core focus on decentralized token issuance infrastructure. Its visual symbol is the minimalist letter “P” with a glass-like texture, emphasizing transparency and a sense of futurism.",
+      "ref": ""
+     }
+    },
+    "narrative_type": "Project category",
+    "distribution": {
+     "celebrity_support": {
+      "text": "There is currently no clear evidence indicating that well-known public figures have directly endorsed these products; instead, such promotion has mostly been carried out spontaneously by community KOLs.",
+      "ref": ""
+     },
+     "max_views": {
+      "text": "",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "The launch of the airdrop application process via the holder portal has sparked a wave of self-inspections by coin holders and increased activity on the blockchain.",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "Some tweets mentioned the NoxaFun fraud incident as a point of comparison to emphasize the security of PONS, without providing any direct evidence of negative impacts.",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "The team remained anonymous and announced the V2 updates as well as the stock-based token distribution feature through their Twitter account @ponsdotfamily.",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "The deployer had previously transferred ownership and promised to repurchase and destroy the tokens using WETH as transaction fees, indicating a constructive approach.",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "The community tweet mentioned that the company’s market value once ranged from $47 million to $100 million; these figures need to be verified in real-time on the blockchain.",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "PUMP",
+      "address": "",
+      "reason": "Both being platforms for issuing tokens, PUMP has a relatively large market value and can serve as a reference.",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "4",
+     "reason": "Bound to Robinhood’s popular ecosystem, it boasts infrastructure-based narratives and the potential for “airdrops” to drive adoption. While community interaction is active, it lacks the influence of top-tier celebrities; therefore, it will be important to monitor the actual adoption rate after the release of V2 features."
+    }
+   },
+   "story_ja": {
+    "project_name": "PONS",
+    "contract_address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "background": {
+     "origin": {
+      "text": "PONSは、Robinhood Chainエコシステムにおける初の非管理型トークン発行プラットフォームとして位置づけられており、そのコンセプトの核心は分散型トークン発行インフラストラクチャーにあります。ビジュアルシンボルとしては、シンプルなガラスのような質感を持つ「P」という文字が使用されており、透明性と未来志向を強調しています。",
+      "ref": ""
+     }
+    },
+    "narrative_type": "プロジェクトタイプ",
+    "distribution": {
+     "celebrity_support": {
+      "text": "現時点では、著名な公人が直接推薦を行ったという明確な証拠はありません。ほとんどがコミュニティ内のKOLによって自発的に広められているだけです。",
+      "ref": ""
+     },
+     "max_views": {
+      "text": "",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "保有者向けポータルサイトで空投申請キャンペーンが開始され、コインを保有しているアドレスの自己チェックやチェーン上でのやり取りが盛んになっています。",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "一部のツイートでは、NoxaFunの詐欺事件を比較例として挙げ、ponsの安全性を強調しており、直接的な負の証拠はない。",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "チームは匿名であり、Twitterアカウント@ponsdotfamilyを通じてV2アップデートや株式との連動によるトークン発行機能について情報を公開しています。",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "デプロイヤーは所有権を移転し、WETHを手数料として使用して破壊されたトークンを買い戻すことを約束しました。この行動は建設的なものでした。",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "コミュニティのツイートによると、その時の時価総額は4,700万ドルから1億ドルの範囲だったとされていますが、このデータはブロックチェーン上でリアルタイムに確認する必要があります。",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "ポンプ",
+      "address": "",
+      "reason": "同じくトークン発行プラットフォームとして、PUMPは市場価値が比較的大きいため、参考になる存在です。",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "4",
+     "reason": "Robinhoodの人気エコシステムに接続されており、インフラストラクチャーに関する情報提供やダイレクトドロップによる促進効果も備わっています。コミュニティ内での活動は活発ですが、トップレベルの有名人の影響力はまだ不足しているため、V2機能が実装された後の実際の利用率に注目する必要があります。"
+    }
+   },
+   "generated_at": "2026-08-28T05:22:19.267Z",
+   "source_tweets": [
+    "2093207087069176051",
+    "2093134846319079850",
+    "2092126729209082109",
+    "2093162384063930677",
+    "2087675227547324521",
+    "2093169394851430594",
+    "2093092527087694067",
+    "2093123576601645169",
+    "2092876399187038540",
+    "2077300296934633958",
+    "2093104216638206199",
+    "2076785825262551342",
+    "2093063086811082803",
+    "2092961642745364828",
+    "2093069177032527969",
+    "2079461410862731366",
+    "2080244673436631236",
+    "2092884162944381258",
+    "2093061111922721156",
+    "2077852269526303108",
+    "2079417965678837838",
+    "2086912035904999818",
+    "2093011077663523249",
+    "2077656092801397235",
+    "2080198296354652556",
+    "2081087726581874876",
+    "2077373140808667506",
+    "2091691925405577257",
+    "2093092760207397246",
+    "2078534472174370918",
+    "2084742887485362191",
+    "2080646687979380823",
+    "2082084399856722217",
+    "2092434237316374785",
+    "2093095779359445339",
+    "2093041418633683325",
+    "2081801016547397673",
+    "2091600736845218301",
+    "2078651192222306339"
+   ]
+  },
+  "version": "v2"
+ },
+ "success": true
+}

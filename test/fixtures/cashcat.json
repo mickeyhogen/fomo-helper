@@ -1,0 +1,224 @@
+{
+ "code": 0,
+ "data": {
+  "history": {
+   "id": "6a8938b0f9c46f2db6b0bb54",
+   "name": "CASHCAT",
+   "ca_address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+   "story": {
+    "project_name": "CASHCAT",
+    "contract_address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "background": {
+     "origin": {
+      "text": "叙事核心绑定 Robinhood 创始人 Vlad Tenev 透露其最初拟将公司命名为 Cash Cat。项目视觉采用流泪猫表情包，构建遗憾与错失恐惧的 Meme 符号。",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     }
+    },
+    "narrative_type": "人物类",
+    "distribution": {
+     "celebrity_support": {
+      "text": "强关联 Robinhood CEO Vlad Tenev 个人历史轶事，具备顶级金融圈人物背书潜力。",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     },
+     "max_views": {
+      "text": "社区推文最高浏览量约 1.7 万次，主流讨论集中在单条高互动内容。",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "记录到单条推文最高获赞 45 次，互动规模尚处早期积累阶段。",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "最高评论数 59 条，显示社区存在一定争议性或讨论热度。",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "大量账号发布格式统一的投票拉盘推文，疑似机器人或自动化营销行为明显。",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "None",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "开发者身份未公开披露，项目呈现典型的社区驱动或匿名团队特征。",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "None",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "None",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "",
+      "address": "",
+      "reason": "No clear comparable project found.",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "3",
+     "reason": "叙事逻辑清晰且绑定知名人物，但社区数据存在大量机器刷量嫌疑，真实热度存疑。需警惕营销号干扰，等待官方进一步动作验证。"
+    }
+   },
+   "story_en": {
+    "project_name": "CASHCAT",
+    "contract_address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "background": {
+     "origin": {
+      "text": "The narrative core is closely linked to Robinhood’s founder, Vlad Tenev, who revealed that he initially intended to name the company “Cash Cat.” The visual design of the project makes use of tearful cat memes to create a symbolic representation of feelings of regret and fear of missing out.",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     }
+    },
+    "narrative_type": "Character category",
+    "distribution": {
+     "celebrity_support": {
+      "text": "The personal anecdotes about Vlad Tenev, the CEO of Robinhood and someone with strong connections in the financial industry, hold significant potential in terms of gaining the support of top figures in this field.",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     },
+     "max_views": {
+      "text": "",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "A large number of accounts are posting tweets with a uniform format that appear to be designed for voting or promoting certain outcomes, and it is clear that these actions are likely carried out by robots or through automated marketing techniques.",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "None",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "The identity of the developers has not been disclosed, and the project exhibits typical characteristics of a community-driven effort or an anonymous team.",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "None",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "None",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "",
+      "address": "",
+      "reason": "No clear comparable projects were found.",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "3",
+     "reason": "The narrative logic is clear, and well-connected to well-known figures; however, there are substantial suspicions that a large amount of artificial traffic has been generated through automated means, casting doubt on the actual popularity of these content pieces. It is necessary to be cautious of potential interference from marketing accounts and await further actions or confirmations from the official authorities."
+    }
+   },
+   "story_ja": {
+    "project_name": "CASHCAT",
+    "contract_address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "background": {
+     "origin": {
+      "text": "物語の核心として、Robinhoodの創設者であるVlad Tenevは、当初会社の名前を「Cash Cat」とするつもりだったと明かしました。プロジェクトのビジュアルには涙を流す猫の絵文字が使用されており、後悔や逃したものへの恐れを表すミームとして機能しています。",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     }
+    },
+    "narrative_type": "キャラクター系",
+    "distribution": {
+     "celebrity_support": {
+      "text": "強いつながりを持つRobinhoodのCEOであるVlad Tenevの個人的な経歴やエピソードは、金融界のトップクラスの人物たちからの支持を得る可能性を秘めています。",
+      "ref": "https://x.com/vladtenev/status/1382390320663560197"
+     },
+     "max_views": {
+      "text": "",
+      "ref": ""
+     },
+     "max_likes": {
+      "text": "",
+      "ref": ""
+     },
+     "max_comments": {
+      "text": "",
+      "ref": ""
+     },
+     "community_participation": {
+      "text": "多数のアカウントが同じ形式の投票呼びかけや株価を押し上げるようなツイートを投稿しており、ロボットや自動化されたマーケティング活動の疑いが強い。",
+      "ref": ""
+     },
+     "negative_incidents": {
+      "text": "いずれもない",
+      "ref": ""
+     }
+    },
+    "developer_info": {
+     "identity": {
+      "text": "開発者の身元は公開されておらず、このプロジェクトは典型的なコミュニティ主導型、または匿名チームによって運営されていると言えます。",
+      "ref": ""
+     },
+     "address_analysis": {
+      "text": "いずれもない",
+      "ref": ""
+     }
+    },
+    "valuation": {
+     "current_marketcap": {
+      "text": "いずれもない",
+      "ref": ""
+     },
+     "benchmark_project": {
+      "name": "",
+      "address": "",
+      "reason": "明確な比較対象となるプロジェクトは見つかりませんでした。",
+      "ref": ""
+     }
+    },
+    "rating": {
+     "score": "3",
+     "reason": "物語の論理構造は明確で、有名な人物も関わっているが、コミュニティデータには大量の機械による操作の疑いがあり、実際の人気度に疑問が残る。マーケティング目的で作られたアカウントによる影響に警戒し、公式側のさらなる動きを待つ必要がある。"
+    }
+   },
+   "generated_at": "2026-08-22T05:50:40.15Z",
+   "source_tweets": [
+    "2091037346305024475",
+    "2091038911724183938",
+    "2091038506487263627",
+    "2091030574353838513",
+    "2091032718142312732",
+    "2091039534817440132",
+    "2082584978983195068",
+    "2091036397075300423",
+    "2091022473823232234",
+    "2090988473217843320",
+    "2091037272678224160",
+    "2075624171325796798",
+    "2091016500500889873",
+    "2091031083257131120",
+    "2091037867149549965",
+    "2091023131787825525",
+    "2091007632303595822",
+    "2090993383825178639",
+    "2091038432743092280",
+    "2091023235429052604"
+   ]
+  },
+  "version": "v2"
+ },
+ "success": true
+}

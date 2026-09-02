@@ -1,0 +1,1700 @@
+/**
+ * Fomo叙事镜 — 渲染回归测试（v0.8：卡片标签页化 叙事/观点/持仓者）
+ *
+ * 起一个本地 https 服务（自签证书 + --host-resolver-rules 把 analysis.test 指到本机）：
+ * 静态托管 test/，外加 /analysis/<ca>.json 动态路由，真实跑通「分析源 URL 模板」这条路径
+ * （{ca} 替换、身份校验、慢响应、404、未授权）。
+ * v0.6 起分析源必须是 https 公网地址，所以测试站点也必须是 https + 公网形状的主机名，
+ * 不能再用 http://127.0.0.1 —— 那正是要被挡掉的形态（见"分析源准入"那一步）。
+ *
+ * 页面里注入真 background.js + content.js：
+ *   - analysis-doc 交给真的 background（真发 HTTP 到上面那个路由）
+ *   - debot-story / debot-tweets 用 fixture 桩回
+ *   - KOL 持仓 / Feed thesis 不再走任何网络：content.js 直接抓 mock 页面的 DOM
+ *
+ * 运行：node test/run-render-test.mjs
+ */
+import https from 'node:https';
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const PPTR = 'file:///usr/local/lib/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js';
+const puppeteer = await import(PPTR).then((m) => m.default ?? m);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const EXT_DIR = path.resolve(__dirname, '..');
+const SHOTS = path.join(__dirname, 'screenshots');
+
+const PONS_CA = '0x39dbed3a2bd333467115de45665cc57f813c4571';
+const CASHCAT_CA = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
+const NOSTORY_CA = '0x1111111111111111111111111111111111111111';
+const SLOW_CA = '0x2222222222222222222222222222222222222222';     // 分析源慢响应
+const MISMATCH_CA = '0x3333333333333333333333333333333333333333'; // 分析源身份不符
+const NOPERM_CA = '0x4444444444444444444444444444444444444444';   // 未授权
+const PLACEHOLDER_CA = '0x5555555555555555555555555555555555555555'; // 占位词合成样本
+const ERROR_CA = '0x6666666666666666666666666666666666666666';       // 后台回一个"脏"错误串
+const BOOM_CA = '0x7777777777777777777777777777777777777777';        // 分析源 500 + 脏正文
+const WALLET = 'Demo111111111111111111111111111111111111111';
+
+const readJson = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', f), 'utf8'));
+const FIX = {
+  pons: readJson('pons.json'),
+  cashcat: readJson('cashcat.json'),
+  nostory: readJson('nostory.json'),
+  tweets: readJson('fxtweet.json'),
+  placeholders: readJson('placeholders.json'),
+};
+const DOSSIER_FAST = readJson('dossier-fast.json'); // 无 creatorOpenCount
+const DOSSIER_DEEP = readJson('dossier-deep.json'); // creatorOpenCount=8, creator_hold
+
+// ---------- 结果记账 ----------
+let failures = 0;
+const stepLog = [];
+function step(name, checks) {
+  const bad = checks.filter((c) => !c.pass);
+  const ok = bad.length === 0;
+  if (!ok) failures++;
+  stepLog.push({ name, ok });
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
+  for (const c of checks) {
+    if (!c.pass) console.log(`        ✗ ${c.label}  → 实际: ${JSON.stringify(c.actual)}`);
+  }
+  return ok;
+}
+const chk = (label, pass, actual) => ({ label, pass: !!pass, actual });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- 静态 + 分析源服务器 ----------
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+               '.json': 'application/json; charset=utf-8', '.png': 'image/png' };
+const withAddress = (doc, ca) => JSON.stringify(Object.assign({}, doc, { address: ca }));
+
+// 自签证书：只为让本地测试站点长成"https + 公网主机名"的样子
+const CERT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fomo-mirror-cert-'));
+const KEY_FILE = path.join(CERT_DIR, 'key.pem');
+const CRT_FILE = path.join(CERT_DIR, 'cert.pem');
+execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+  '-keyout', KEY_FILE, '-out', CRT_FILE, '-days', '2',
+  '-subj', '/CN=analysis.test', '-addext', 'subjectAltName=DNS:analysis.test'], { stdio: 'ignore' });
+
+const analysisHits = [];       // https 站点收到的分析源请求（被默认 SSRF 防线挡下的不该出现在这里）
+const privateHits = [];        // 高级开关放行后，内网/http 站点真收到的请求
+
+/** 同一套 /analysis 路由 + 静态文件逻辑，https 与 http 两个站点共用；命中记进各自的 log。 */
+function makeAnalysisHandler(hitLog) {
+  return async (req, res) => {
+    const url = new URL(req.url, 'http://analysis.test');
+    const m = /^\/analysis\/(.+)\.json$/.exec(url.pathname);
+    if (m) {
+      const ca = decodeURIComponent(m[1]);
+      hitLog.push(ca);
+      const send = (code, body) => { res.writeHead(code, { 'content-type': MIME['.json'] }); res.end(body || '{}'); };
+      if (ca === PONS_CA) return send(200, withAddress(DOSSIER_FAST, ca));
+      if (ca === CASHCAT_CA) return send(200, withAddress(DOSSIER_DEEP, ca));
+      if (ca === MISMATCH_CA) return send(200, JSON.stringify(DOSSIER_FAST)); // address 是别的币
+      if (ca === SLOW_CA) { await sleep(900); return send(404, '{"error":"not found"}'); }
+      if (ca === BOOM_CA) {
+        res.writeHead(500, { 'content-type': MIME['.json'] });
+        return res.end('{"error":"shim: internal boom kind=network stage=parse"}');
+      }
+      return send(404, '{"error":"not found"}');
+    }
+    const rel = url.pathname === '/' ? '/mock-fomo.html' : url.pathname;
+    const file = path.join(__dirname, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
+    if (!file.startsWith(__dirname) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      res.writeHead(404).end('not found'); return;
+    }
+    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.end(fs.readFileSync(file));
+  };
+}
+
+const server = https.createServer({
+  key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CRT_FILE),
+}, makeAnalysisHandler(analysisHits));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const PORT = server.address().port;
+const BASE = `https://analysis.test:${PORT}`;
+const ANALYSIS_TPL = `${BASE}/analysis/{ca}.json`;
+const DETAIL_TPL = `${BASE}/report/{ca}.html`;
+
+// 明文 http 站点：模拟"用户自建在内网/局域网/Tailscale 上、走 http 的 dossier 源"。
+// 页面与分析源同为 http://127.0.0.1（同源，无混合内容），host 又是 127.x 环回 →
+// 默认防线会双重拦下（http + 环回），只有开了高级开关才放行；正好用来验证开关。
+const httpServer = http.createServer(makeAnalysisHandler(privateHits));
+await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
+const HTTP_PORT = httpServer.address().port;
+const HTTP_BASE = `http://127.0.0.1:${HTTP_PORT}`;
+const PRIVATE_HTTP_TPL = `${HTTP_BASE}/analysis/{ca}.json`;
+
+// v0.6 默认防线要挡掉的两种形态（开关关时）
+const HTTP_TPL = `http://analysis.test:${PORT}/analysis/{ca}.json`;
+const PRIVATE_TPL = 'https://192.168.1.5/analysis/{ca}.json';
+
+// ---------- chrome API 桩（导航前注入） ----------
+function chromeShim(fx) {
+  window.__FOMO_DEBOT_TEST__ = true;
+  // 默认模拟"浏览器无内置翻译"这条降级路径（本机 headless 其实有，但语言包 downloadable）。
+  // fx.translator 给了值就装一个可控的 Translator 桩，用来跑中文自动翻译三条路径。
+  window.__translatorCreated = 0;
+  if (fx.translator) {
+    window.Translator = {
+      availability: async () => fx.translator,
+      create: async () => {
+        window.__translatorCreated++;
+        if (fx.createThrows) {
+          const e = new Error('user gesture required');
+          e.name = fx.createThrows;      // 'NotAllowedError'
+          throw e;
+        }
+        return { translate: async (t) => '【译】' + t };
+      },
+    };
+  } else {
+    try { delete window.Translator; } catch (_) { window.Translator = undefined; }
+  }
+  // 捕获未打补丁的原生 pushState，供测试"仅靠 800ms 轮询"的 autoOpen 路径
+  window.__origPush = history.pushState.bind(history);
+
+  window.__grantPerm = true;
+  window.__debotCalls = [];
+
+  // v0.7.2: 默认不预置 openMode/autoOpen → content.js resolveOpenMode 回落 'compact'（= 老 autoOpen:true 语义）。
+  // fx.syncSeed 可注入初始 sync 值（用来测 openMode='full'/'off' 与老 autoOpen 迁移）。
+  const store = {
+    sync: Object.assign({ hoverPreview: true, lang: 'zh', analysisTemplate: '', detailTemplate: '',
+            allowPrivateAnalysisSource: false }, fx.syncSeed || {}),
+    local: Object.assign({}, fx.localSeed || null), session: {},
+  };
+  const listeners = [];
+  const area = (name) => ({
+    get(keys, cb) {
+      const out = {}; const s = store[name];
+      if (keys == null) Object.assign(out, s);
+      else if (typeof keys === 'string') { if (keys in s) out[keys] = s[keys]; }
+      else if (Array.isArray(keys)) keys.forEach((k) => { if (k in s) out[k] = s[k]; });
+      else for (const k in keys) out[k] = (k in s) ? s[k] : keys[k];
+      if (cb) setTimeout(() => cb(out), 0);
+      return Promise.resolve(out);
+    },
+    set(obj, cb) {
+      const changes = {};
+      for (const k in obj) changes[k] = { oldValue: store[name][k], newValue: obj[k] };
+      Object.assign(store[name], obj);
+      setTimeout(() => { for (const fn of listeners) { try { fn(changes, name); } catch (_) {} } }, 0);
+      if (cb) setTimeout(cb, 0);
+      return Promise.resolve();
+    },
+    remove(k, cb) { delete store[name][k]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+  });
+  window.__setSetting = (obj) => area('sync').set(obj);
+  const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+
+  let bgListener = null;
+  window.chrome = {
+    runtime: {
+      lastError: undefined,
+      onMessage: { addListener(fn) { bgListener = fn; } },
+      sendMessage(msg, cb) {
+        window.__debotCalls.push(msg.type + ':' + (msg.ca || (msg.ids || []).join(',')));
+        if (msg.type === 'analysis-doc' && bgListener) { bgListener(msg, {}, cb); return; } // 走真 background
+        let reply;
+        if (msg.type === 'debot-story') {
+          if (same(msg.ca, fx.placeholderCa)) reply = { ok: true, payload: fx.placeholders.data.history };
+          else if (same(msg.ca, fx.cashcatCa)) reply = { ok: true, payload: fx.cashcat.data.history };
+          else if (same(msg.ca, fx.nostoryCa)) reply = { ok: false, kind: 'nostory', error: fx.nostory.error };
+          // 故意回一个"脏"错误：内部 kind + 内部词，一个字都不许出现在卡片上
+          else if (same(msg.ca, fx.errorCa)) {
+            reply = { ok: false, kind: 'shim', error: 'shim: internal boom kind=network stage=parse' };
+          } else reply = { ok: true, payload: fx.pons.data.history };
+        } else if (msg.type === 'debot-tweets') {
+          // 走真 background 的 normalizeTweet：链接规范化这条也要被测到
+          const list = [];
+          for (const id of (msg.ids || [])) {
+            const t = (typeof normalizeTweet === 'function')
+              ? normalizeTweet(id, fx.tweets.byId[id]) : null;
+            if (t) list.push(t);
+          }
+          reply = { ok: true, payload: list };
+        } else reply = { ok: false, kind: 'network', error: 'unknown message' };
+        setTimeout(() => cb(reply), 8);
+      },
+    },
+    storage: {
+      sync: area('sync'), local: area('local'), session: area('session'),
+      onChanged: { addListener(fn) { listeners.push(fn); }, removeListener() {} },
+    },
+    permissions: {
+      contains: () => Promise.resolve(!!window.__grantPerm),
+      request: () => Promise.resolve(true),
+    },
+  };
+}
+
+// ---------- 页面探针 ----------
+async function snap(page) {
+  return page.evaluate(() => {
+    const hnd = window.__fomoDebotTestHandle;
+    const sh = hnd && hnd.shadow;
+    if (!sh) return { hasShadow: false };
+    const card = sh.querySelector('.card');
+    const pv = sh.querySelector('.chip.pv');
+    // v0.8：slot 改挂在三个标签页 pane 下，按稳定类名取，不再按 nth-of-type 数位置
+    const slotText = (cls) => (sh.querySelector('.slot-' + cls) || {}).textContent || '';
+    const txts = (sel) => Array.from(sh.querySelectorAll(sel)).map((e) => e.textContent);
+    return {
+      hasShadow: true,
+      visible: !!card && !card.hidden,
+      text: card ? card.textContent : '',
+      name: (sh.querySelector('.name') || {}).textContent || '',
+      starsOn: sh.querySelectorAll('.star.on').length,
+      summaries: txts('summary'),
+      previewChip: !!pv && !pv.hidden,
+      langBtn: (() => { const b = sh.querySelector('.btn.lang'); return b && !b.hidden ? b.textContent : null; })(),
+      // v0.7 头部：地址收进复制钮；中/EN 双档高亮
+      copyBtn: (() => {
+        const b = sh.querySelector('.btn.copy');
+        return b ? { text: b.textContent, title: b.getAttribute('title'), hidden: !!b.hidden } : null;
+      })(),
+      langActive: (() => { const a = sh.querySelector('.btn.lang .lg.on'); return a ? a.textContent : null; })(),
+      starRowHidden: (() => { const r = sh.querySelector('.hdr-stars'); return r ? !!r.hidden : null; })(),
+      hdrText: (() => { const e = sh.querySelector('.hdr'); return e ? e.textContent : ''; })(),
+      kolCosts: txts('.slot-kol .rcost'),
+      kolLines: Array.from(sh.querySelectorAll('.slot-kol .row-item')).map((r) => r.textContent),
+      thesisAuthorCount: sh.querySelectorAll('.slot-thesis .rauthor').length,
+      footer: (sh.querySelector('.ftr') || {}).textContent || '',
+      hasFooter: !!sh.querySelector('.ftr'),   // v0.7.3：页脚整段移除后应恒为 false
+      state: hnd.state,
+      // v0.8 标签栏：叙事(默认) / 观点 / 持仓者
+      tabLabels: Array.from(sh.querySelectorAll('.tab')).map((b) => b.textContent),
+      activeTab: (() => { const b = sh.querySelector('.tab.on'); return b ? b.dataset.tab : null; })(),
+      viewsCount: (() => { const c = sh.querySelector('.tab[data-tab="views"] .tcount'); return c ? c.textContent : null; })(),
+      holdersCount: (() => { const c = sh.querySelector('.tab[data-tab="holders"] .tcount'); return c ? c.textContent : null; })(),
+      paneNarrativeHidden: (() => { const p = sh.querySelector('.pane-narrative'); return p ? !!p.hidden : null; })(),
+      paneViewsHidden: (() => { const p = sh.querySelector('.pane-views'); return p ? !!p.hidden : null; })(),
+      paneHoldersHidden: (() => { const p = sh.querySelector('.pane-holders'); return p ? !!p.hidden : null; })(),
+      debotText: slotText('debot'), thesisText: slotText('thesis'), analysisText: slotText('analysis'),
+      kolText: slotText('kol'), tweetsText: slotText('tweets'),
+      sectionTitles: txts('.sectitle'),
+      badges: txts('.badge'),
+      badgeTone: (() => { const b = sh.querySelector('.badge'); return b ? b.className : ''; })(),
+      kvKeys: txts('.analysis .kv .k'),
+      analysisKv: Array.from(sh.querySelectorAll('.analysis .kv')).map((r) => r.textContent),
+      memeText: (sh.querySelector('.memehook') || {}).textContent || '',
+      memeMore: (() => { const b = sh.querySelector('.memehook .more'); return b ? b.textContent.trim() : null; })(),
+      detailLink: (() => {
+        const a = Array.from(sh.querySelectorAll('.analysis .dmeta a')).find((x) => x.textContent.indexOf('查看完整分析') === 0);
+        return a ? a.getAttribute('href') : null;
+      })(),
+      // DeBot 开发者段（关键词门）
+      devLabels: txts('.slot-debot .item .lbl'),
+      // 观点页（Thesis，DOM 抓取；v0.8 起独立标签页、点赞降序全量）
+      thesisRows: sh.querySelectorAll('.slot-thesis .row-item').length,
+      thesisAuthors: txts('.slot-thesis .rauthor'),
+      thesisLikes: txts('.slot-thesis .rlikes'),
+      thesisPos: txts('.slot-thesis .rval'),
+      thesisPnl: txts('.slot-thesis .pnl'),
+      thesisLinks: Array.from(sh.querySelectorAll('.slot-thesis .rtext a, .slot-thesis .chiplink')).map((a) => a.getAttribute('href')),
+      // 持仓者页（KOL，DOM 抓取）
+      kolRows: sh.querySelectorAll('.slot-kol .row-item').length,
+      kolAuthors: txts('.slot-kol .rauthor'),
+      kolPos: txts('.slot-kol .rval'),
+      kolPnl: txts('.slot-kol .pnl'),
+      kolPnlNeg: sh.querySelectorAll('.slot-kol .pnl.neg').length,
+      kolPnlPos: sh.querySelectorAll('.slot-kol .pnl.pos').length,
+      kolSubs: txts('.slot-kol .rsub'),
+      launcherVisible: (() => { const l = sh.querySelector('.launcher'); return l ? !l.hidden : null; })(),
+      // 推文
+      tweetsOpen: (() => { const d = sh.querySelector('details.tweets'); return d ? d.open : null; })(),
+      tweetsSummary: (() => { const d = sh.querySelector('details.tweets > summary'); return d ? d.textContent : ''; })(),
+      tweetsVisibleRows: sh.querySelectorAll('details.tweets > .row-item').length,
+      tweetsMoreRows: sh.querySelectorAll('.more-block .row-item').length,
+      tweetLinks: Array.from(sh.querySelectorAll('details.tweets .rlink')).map((a) => a.getAttribute('href')),
+      trBtn: (() => { const b = sh.querySelector('.tbtn'); return b ? { text: b.textContent, disabled: b.hasAttribute('disabled'), title: b.getAttribute('title') } : null; })(),
+      hasTranslatorApi: typeof Translator !== 'undefined',
+      // v0.6 翻译提示条（一次性、只露一条）
+      prompts: Array.from(sh.querySelectorAll('.tprompt')).map((p) => ({ text: p.textContent, hidden: !!p.hidden })),
+      promptShown: Array.from(sh.querySelectorAll('.tprompt')).filter((p) => !p.hidden).length,
+      promptRect: (() => {
+        const p = Array.from(sh.querySelectorAll('.tprompt')).find((x) => !x.hidden);
+        if (!p) return null;
+        const r = p.getBoundingClientRect();
+        const det = p.closest('details');
+        const sec = p.closest('.sec');
+        return { w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left),
+          top: Math.round(r.top), inClosedDetails: !!det && !det.open,
+          owner: sec ? ((sec.querySelector('.sectitle') || {}).textContent || '') : '' };
+      })(),
+      thesisTexts: txts('.slot-thesis .rtext'),
+      tweetTexts: txts('details.tweets .rtext'),
+      // v0.6 DeBot 段默认展开/收起状态（内容一条不少，只是默认态分层）
+      debotOrder: Array.from(sh.querySelectorAll('.slot-debot details > summary')).map((e) => e.textContent),
+      // 折叠与否按"整段高度 - 摘要行高度"判定：折叠时 details 只占摘要一行
+      debotSections: Array.from(sh.querySelectorAll('.slot-debot details')).map((d) => {
+        const sum = d.querySelector('summary');
+        const h = d.getBoundingClientRect().height;
+        const sh2 = sum ? sum.getBoundingClientRect().height : 0;
+        return { title: sum ? sum.textContent : '', open: !!d.open, bodyH: Math.round(h - sh2) };
+      }),
+      // v0.6 头部压成一行
+      hdrHeight: (() => { const e = sh.querySelector('.hdr'); return e ? Math.round(e.getBoundingClientRect().height) : null; })(),
+      hasHdrBot: !!sh.querySelector('.hdr-bot'),
+      // 停靠
+      cardRect: (() => { if (!card) return null; const r = card.getBoundingClientRect();
+        return { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) }; })(),
+      panelRect: (() => { const p = document.getElementById('panel'); if (!p) return null; const r = p.getBoundingClientRect();
+        return { right: Math.round(r.right), top: Math.round(r.top) }; })(),
+      headerBottom: (() => { const e = document.getElementById('token-header'); return e ? Math.round(e.getBoundingClientRect().bottom) : null; })(),
+    };
+  });
+}
+
+const shot = (page, file) => page.screenshot({ path: path.join(SHOTS, file) });
+/** 只截卡片那一块，看排版细节用。 */
+const shotClip = (page, file, rect) => (rect
+  ? page.screenshot({ path: path.join(SHOTS, file),
+      clip: { x: Math.max(0, rect.left - 6), y: Math.max(0, rect.top - 6),
+              width: Math.min(400, rect.right - rect.left + 12),
+              height: Math.min(560, rect.bottom - rect.top + 12) } })
+  : page.screenshot({ path: path.join(SHOTS, file) }));
+const uniq = (arr) => Array.from(new Set(arr));
+/** 卡片上永远不该出现的内部词：后台 kind、桩标记、调试串。 */
+const LEAK_RE = /shim|kind=|stage=|boom|no-permission|nostory|mismatch|\[object Object\]|undefined|HTTP \d/;
+const scrollToSlot = (page, cls) => page.evaluate((c) => {
+  const sh = window.__fomoDebotTestHandle.shadow;
+  const el = sh.querySelector('.slot-' + c);
+  if (el) el.scrollIntoView({ block: 'start' });
+}, cls);
+/** v0.8：点卡片顶部的标签页（叙事 narrative / 观点 views / 持仓者 holders）。 */
+const clickTab = (page, key) => page.evaluate((k) => {
+  const sh = window.__fomoDebotTestHandle.shadow;
+  const b = sh.querySelector('.tab[data-tab="' + k + '"]');
+  if (b) b.click();
+}, key);
+const pushState = (page, url) => page.evaluate((u) => history.pushState({}, '', u), url);
+
+// ---------- 主流程 ----------
+fs.mkdirSync(SHOTS, { recursive: true });
+const browser = await puppeteer.launch({
+  executablePath: '/usr/bin/chromium', headless: 'new',
+  acceptInsecureCerts: true,           // 自签证书
+  args: ['--no-sandbox', '--disable-dev-shm-usage',
+    '--ignore-certificate-errors',
+    '--allow-running-insecure-content',
+    '--no-proxy-server',               // 否则 analysis.test / 127.0.0.1 会被容器代理接管
+    '--host-resolver-rules=MAP analysis.test 127.0.0.1'],
+});
+
+const BG_SRC = fs.readFileSync(path.join(EXT_DIR, 'background.js'), 'utf8');
+const CT_SRC = fs.readFileSync(path.join(EXT_DIR, 'content.js'), 'utf8');
+const SHIM_BASE = () => ({
+  tweets: FIX.tweets, pons: FIX.pons, cashcat: FIX.cashcat, nostory: FIX.nostory,
+  placeholders: FIX.placeholders, cashcatCa: CASHCAT_CA, nostoryCa: NOSTORY_CA,
+  placeholderCa: PLACEHOLDER_CA, errorCa: ERROR_CA,
+  translator: null, createThrows: null, localSeed: null,
+});
+
+/** 起一个装好桩 + 真 background + 真 content 的页面。 */
+async function openPage(over, baseOverride) {
+  const p = await browser.newPage();
+  await p.setViewport({ width: 1280, height: 900 });
+  p.on('pageerror', (e) => { console.log('   [page error]', e.message); failures++; });
+  await p.evaluateOnNewDocument(chromeShim, Object.assign(SHIM_BASE(), over || {}));
+  await p.goto(`${baseOverride || BASE}/mock-fomo.html`, { waitUntil: 'domcontentloaded' });
+  await p.addScriptTag({ content: BG_SRC });
+  await p.addScriptTag({ content: CT_SRC });
+  await sleep(150);
+  return p;
+}
+
+/** 起一个装好 storage.sync（可预置 seed）的设置面板页，用来测 openMode 下拉与老 autoOpen 迁移。 */
+async function openPopup(seed) {
+  const pp = await browser.newPage();
+  await pp.setViewport({ width: 340, height: 660 });
+  await pp.evaluateOnNewDocument((seedObj) => {
+    const store = Object.assign({}, seedObj || {});
+    window.__store = store;
+    window.chrome = {
+      storage: { sync: {
+        get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in store) ? store[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
+        set(o, cb) { Object.assign(store, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+        remove(k, cb) { const arr = Array.isArray(k) ? k : [k]; for (const x of arr) delete store[x]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+      } },
+      permissions: { request: () => Promise.resolve(true), contains: () => Promise.resolve(true) },
+    };
+  }, seed || {});
+  await pp.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await pp.setContent(fs.readFileSync(path.join(EXT_DIR, 'popup.html'), 'utf8')
+    .replace('<script src="popup.js"></script>', '<script>' + fs.readFileSync(path.join(EXT_DIR, 'popup.js'), 'utf8') + '</script>'));
+  await sleep(250);
+  return pp;
+}
+
+try {
+  try {
+    const probe = await browser.newPage();
+    await probe.goto(`${BASE}/mock-fomo.html`, { waitUntil: 'domcontentloaded' });
+    const info = await probe.evaluate(async () => {
+      if (typeof Translator === 'undefined') return 'Translator 未定义';
+      try { return 'availability(en→zh) = ' + await Translator.availability({ sourceLanguage: 'en', targetLanguage: 'zh' }); }
+      catch (e) { return 'availability 抛错: ' + e.name; }
+    });
+    console.log('[诊断] 真实浏览器内置翻译：' + info);
+    await probe.close();
+  } catch (_) { console.log('[诊断] 内置翻译探测失败'); }
+
+  const page = await openPage();
+
+  // --- 1 公开版首屏 ---
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(900);
+  let s = await snap(page);
+  step('步骤 1 · 公开版渲染：有评级理由、无星级、无估值段', [
+    chk('卡片可见', s.visible, s.visible),
+    chk('包含 PONS', s.text.includes('PONS'), s.name),
+    chk('公开版不显示星级', s.starsOn === 0, s.starsOn),
+    chk('评级理由照常显示', s.summaries.includes('评级理由'), s.summaries),
+    chk('估值段已彻底移除', !s.summaries.includes('估值'), s.summaries),
+    chk('含"起源"分区', s.summaries.includes('起源'), s.summaries),
+    // v0.7.3：来源推文条数改由推文段摘要承载，页脚整段移除
+    chk('推文段摘要仍带来源推文数', s.tweetsText.includes('39 条'), s.tweetsText.slice(0, 40)),
+  ]);
+  await shot(page, '01-public-docked.png');
+
+  // --- 1b 页脚整段移除（生成于 X 前 / 在 DeBot 打开）---
+  step('步骤 1b · 卡片页脚整段移除：无 .ftr、无"生成于"、无页脚版"在 DeBot 打开"', [
+    chk('.ftr 元素不存在', s.hasFooter === false, s.hasFooter),
+    chk('卡片正文无"生成于 X 前"', !s.text.includes('生成于'), s.text.includes('生成于')),
+    // 空状态里的"在 DeBot 打开"是另一个入口，此处 PONS 有叙事、不该出现任何"在 DeBot 打开"
+    chk('有叙事的卡片不再出现"在 DeBot 打开"', !s.text.includes('在 DeBot 打开'), s.text.includes('在 DeBot 打开')),
+  ]);
+  await shotClip(page, '25-no-footer-single-toggle.png', s.cardRect);
+
+  // --- 2 默认停靠位置 ---
+  step('步骤 2 · 默认停靠在左侧面板右缘，不压信息条也不吃 Holders', [
+    chk('紧贴面板右缘 +8px', !!s.cardRect && !!s.panelRect && s.cardRect.left === s.panelRect.right + 8,
+      s.cardRect && s.panelRect && [s.cardRect.left, s.panelRect.right]),
+    chk('顶部不高于 190', !!s.cardRect && s.cardRect.top >= 190, s.cardRect && s.cardRect.top),
+    chk('不遮住上方代币信息条', !!s.cardRect && s.cardRect.top >= s.headerBottom, [s.cardRect && s.cardRect.top, s.headerBottom]),
+    chk('底部给 Holders 留出空间', !!s.cardRect && s.cardRect.bottom <= 900 - 140 + 1, s.cardRect && s.cardRect.bottom),
+    chk('宽度 360', !!s.cardRect && (s.cardRect.right - s.cardRect.left) === 360, s.cardRect && (s.cardRect.right - s.cardRect.left)),
+  ]);
+
+  // --- 2b 头部压成一行（v0.6） ---
+  step('步骤 2b · 头部瘦身：地址收进复制钮、类型 chip 保留、中/EN 双档', [
+    chk('旧的第二行容器已移除', s.hasHdrBot === false, s.hasHdrBot),
+    chk('公开版头部仍是单行（≤ 40px）', s.hdrHeight !== null && s.hdrHeight <= 40, s.hdrHeight),
+    chk('名字仍在', s.name.includes('PONS'), s.name),
+    chk('头部不再出现整串/半串合约地址', !/0x39db|0x39dbed3a/.test(s.hdrText), s.hdrText),
+    chk('复制钮存在且带正确 tooltip',
+      !!s.copyBtn && s.copyBtn.hidden === false && s.copyBtn.title === '复制合约地址', s.copyBtn),
+    chk('叙事类型 chip 仍在（主人明确要保留）',
+      s.hdrText.includes('项目类'), s.hdrText),
+    chk('中/EN 双档，当前是中', s.langActive === '中', [s.langActive, s.langBtn]),
+    chk('公开版无星级 → 星级行整行收起', s.starRowHidden === true, s.starRowHidden),
+  ]);
+
+  // 复制钮真的复制完整地址（clipboard 在 headless 里不可用 → 只验证不抛错且给了 toast）
+  await page.evaluate(() => {
+    const sh = window.__fomoDebotTestHandle.shadow;
+    const b = sh.querySelector('.btn.copy'); if (b) b.click();
+  });
+  await sleep(120);
+  await shotClip(page, '15-header-slim.png', s.cardRect);
+
+  // --- 2c DeBot 段默认态分层（Option B：内容一条不少，只改默认展开/收起） ---
+  {
+    const secs = s.debotSections;
+    const find = (t) => secs.find((x) => x.title === t);
+    step('步骤 2c · 顺序 起源→评级理由→传播→开发者；前两段展开、后两段收起', [
+      chk('四段都在（一条内容都没被删）',
+        ['评级理由', '起源', '传播', '开发者'].every(find), secs.map((x) => x.title)),
+      chk('段落顺序为 起源 → 评级理由 → 传播 → 开发者',
+        s.debotOrder.join('>') === '起源>评级理由>传播>开发者', s.debotOrder),
+      chk('评级理由默认展开', !!find('评级理由') && find('评级理由').open, find('评级理由')),
+      chk('起源默认展开', !!find('起源') && find('起源').open, find('起源')),
+      chk('评级理由排第二仍保留高亮框样式',
+        await page.evaluate(() => {
+          const sh = window.__fomoDebotTestHandle.shadow;
+          const d = Array.from(sh.querySelectorAll('.slot-debot details'))
+            .find((x) => (x.querySelector('summary') || {}).textContent === '评级理由');
+          return !!d && d.classList.contains('rating');
+        }), null),
+      chk('传播默认收起', !!find('传播') && find('传播').open === false, find('传播')),
+      chk('开发者默认收起', !!find('开发者') && find('开发者').open === false, find('开发者')),
+      chk('收起的段只占摘要一行（正文不占版面）',
+        !!find('传播') && find('传播').bodyH <= 4 && !!find('开发者') && find('开发者').bodyH <= 4,
+        [find('传播'), find('开发者')]),
+      chk('展开的段正文实实在在占着高度', !!find('起源') && find('起源').bodyH > 10, find('起源')),
+    ]);
+  }
+
+  // 展开"传播"确认内容确实还在（只是默认收起，不是被删）
+  await page.evaluate(() => {
+    const sh = window.__fomoDebotTestHandle.shadow;
+    for (const d of sh.querySelectorAll('.slot-debot details')) {
+      const t = (d.querySelector('summary') || {}).textContent;
+      if (t === '传播' || t === '开发者') d.open = true;
+    }
+  });
+  await sleep(120);
+  {
+    const opened = await snap(page);
+    const find = (t) => opened.debotSections.find((x) => x.title === t);
+    step('步骤 2d · 点开后传播/开发者内容完整（默认态改变 ≠ 内容删减）', [
+      chk('传播展开后有正文', !!find('传播') && find('传播').bodyH > 10, find('传播')),
+      chk('开发者展开后有正文', !!find('开发者') && find('开发者').bodyH > 10, find('开发者')),
+      chk('传播字段仍是六选有内容者', opened.devLabels.length > 0, opened.devLabels),
+    ]);
+    await shotClip(page, '17-fields-expanded.png', opened.cardRect);
+  }
+
+  // --- 3 DeBot 开发者段（关键词门） ---
+  step('步骤 3 · 开发者段只保留命中关键词的文字行', [
+    chk('开发者段存在', s.summaries.includes('开发者'), s.summaries),
+    chk('命中"转移所有权/回购/销毁"的地址分析被保留', s.devLabels.includes('地址分析'), s.devLabels),
+    chk('未命中关键词的"身份"行被隐去', !s.devLabels.includes('身份'), s.devLabels),
+    chk('不再有 fomo 开发者战绩行', !s.devLabels.includes('战绩'), s.devLabels),
+  ]);
+
+  // --- 4 占位词过滤（含 v0.5 扩展的"暂无…"整句） ---
+  await pushState(page, `/tokens/robinhood/${PLACEHOLDER_CA}`);
+  await sleep(700);
+  let ph = await snap(page);
+  step('步骤 4 · 占位词等同空值：传播段与开发者段整段消失', [
+    chk('起源段仍在（证明卡片没空掉）', ph.summaries.includes('起源'), ph.summaries),
+    chk('评级理由仍在', ph.summaries.includes('评级理由'), ph.summaries),
+    chk('六项全占位 → 传播段消失', !ph.summaries.includes('传播'), ph.summaries),
+    chk('文字占位 → 开发者段消失', !ph.summaries.includes('开发者'), ph.summaries),
+    chk('页面看不到 None/暂无 之类占位词', !/None|N\/A|暂无|未发现|规模未知/.test(ph.debotText), ph.debotText.slice(0, 100)),
+  ]);
+  await shot(page, '02-placeholders-collapsed.png');
+
+  // 中段带"无"的真实句子不被误删（用 pons 的 address_analysis 验证）
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(700);
+  s = await snap(page);
+  step('步骤 4b · 正文中间带"无"的真实句子不被误判为占位', [
+    chk('起源正文完整保留', s.debotText.includes('去中心化发币基础设施'), s.debotText.slice(0, 40)),
+    chk('负面事件里的"…无直接负面实锤。"未被整段过滤（传播段仍在）', s.summaries.includes('传播'), s.summaries),
+  ]);
+
+  // --- 5 中英切换 ---
+  await page.evaluate(() => window.__fomoDebotTestHandle.shadow.querySelector('.btn.lang').click());
+  await sleep(150);
+  s = await snap(page);
+  step('步骤 5 · 切换英文叙事', [
+    chk('出现英文起源正文', s.text.includes('non-hosted token issuance platform'), s.langBtn),
+    chk('中/EN 双档切到 EN 高亮', s.langActive === 'EN', [s.langActive, s.langBtn]),
+  ]);
+  await shot(page, '03-en.png');
+  await page.evaluate(() => window.__fomoDebotTestHandle.shadow.querySelector('.btn.lang').click());
+  await sleep(120);
+
+  // --- 6 悬停预览 ---
+  await page.hover('#row-anchor-cashcat a');
+  await sleep(1000); // > HOVER_DEBOUNCE_MS(600) + 取数渲染
+  s = await snap(page);
+  step('步骤 6 · 悬停左栏 CASHCAT 行出预览', [
+    chk('展示 CASHCAT', s.name.includes('CASHCAT'), s.name),
+    chk('预览角标可见', s.previewChip, s.previewChip),
+    chk('模式为 preview', s.state.mode === 'preview', s.state.mode),
+  ]);
+  await shot(page, '04-hover-preview.png');
+
+  // --- 6b 快速划过一串行不该触发任何预览（v0.7 主人反馈：太灵敏） ---
+  {
+    // 先把指针挪出左栏（上一步还停在 CASHCAT 行上），再回到 URL 态拿干净起点
+    await page.mouse.move(900, 500);
+    await sleep(800);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const before = await snap(page);
+    const callsBefore = await page.evaluate(() => window.__debotCalls.length);
+
+    // 每行只停 250ms（< 600ms 门槛）就换下一行，来回穿三次
+    for (const sel of ['#row-anchor-cashcat a', '#row-fiber .sym', '#row-anchor-pons a',
+                       '#row-anchor-cashcat a', '#row-fiber .sym']) {
+      await page.hover(sel);
+      await sleep(250);
+    }
+    const during = await snap(page);
+    const callsDuring = await page.evaluate(() => window.__debotCalls.length);
+
+    // 现在真正停稳在 CASHCAT 行上
+    await page.hover('#row-anchor-cashcat a');
+    await sleep(1000);
+    const settled = await snap(page);
+
+    step('步骤 6b · 每行只停 250ms 地划过 → 一次预览都不触发；停稳 600ms 才出', [
+      chk('起点是 URL 态的 PONS', before.name.includes('PONS') && before.state.mode === 'url',
+        [before.name, before.state.mode]),
+      chk('划过全程没有切换到别的币', (during.state.ca || '').toLowerCase() === PONS_CA, during.state.ca),
+      chk('划过全程没有进入预览模式', during.state.mode === 'url', during.state.mode),
+      chk('划过全程没有向后台多发一次取数', callsDuring === callsBefore, [callsBefore, callsDuring]),
+      chk('停稳之后预览照常出来', settled.name.includes('CASHCAT') && settled.state.mode === 'preview',
+        [settled.name, settled.state.mode]),
+    ]);
+  }
+
+  // --- 6c 核心 BUG 修复：同一行内不同子元素连续 mouseover（<600ms）不得饿死 dwell 计时 ---
+  //（旧代码每次 mouseover 都 clearTimeout 重置 → 行内有一堆子元素时 600ms 永远走不完，
+  //  预览从来不弹。修复后：只要还停在同一行/同一 CA，行内微动不重置计时，600ms 照常到点弹出。）
+  {
+    // 干净起点：真鼠标挪出左栏，回到 URL 态 PONS
+    await page.mouse.move(900, 500);
+    await sleep(800);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const start = await snap(page);
+    const callsBefore = await page.evaluate(() => window.__debotCalls.length);
+
+    // 取同一行 CASHCAT 的三个不同子元素（sym / meta / 外层 a），它们 closest('a,li,tr,div')
+    // 都指向同一个 <a> —— 就是"同一行"。用合成 mouseover 精确控制 target 与左栏坐标。
+    await page.evaluate(() => {
+      const a = document.querySelector('#row-anchor-cashcat a');
+      window.__hoverKids = [a.querySelector('.sym'), a.querySelector('.meta'), a, a.querySelector('.sym')];
+    });
+    const fireKid = (i) => page.evaluate((idx) => {
+      const el = window.__hoverKids[idx];
+      el.dispatchEvent(new MouseEvent('mouseover',
+        { bubbles: true, composed: true, clientX: 100, clientY: 200 }));
+    }, i);
+
+    // 4 次落在同一行不同子元素上、每次间隔 150ms（均 < 600ms 门槛，累计跨越 600ms）
+    await fireKid(0); await sleep(150);   // t≈0   计时器起
+    await fireKid(1); await sleep(150);   // t≈150 行内微动，旧代码会在这里重置
+    await fireKid(2); await sleep(150);   // t≈300
+    await fireKid(3); await sleep(150);   // t≈450
+    // 到这里累计 ~600ms：修复后计时器刚好到点，预览应已弹出；
+    // 旧代码最后一次重置在 ~450ms，要到 ~1050ms 才弹，此刻还没有。
+    await sleep(350);                     // 快照落在 ~800ms：> 600(新) 且 < 1050(旧)
+    const fired = await snap(page);
+    const callsAfter = await page.evaluate(() => window.__debotCalls.length);
+    await shot(page, '26-hover-preview-fires.png');
+
+    step('步骤 6c · 同一行不同子元素连点 mouseover（<600ms）→ dwell 不被饿死，预览照常弹出', [
+      chk('起点是 URL 态 PONS', start.name.includes('PONS') && start.state.mode === 'url',
+        [start.name, start.state.mode]),
+      chk('同行连点后预览最终弹出（计时器没被行内微动重置）',
+        fired.name.includes('CASHCAT') && fired.state.mode === 'preview',
+        [fired.name, fired.state.mode]),
+      chk('弹出的正是被悬停那只币', (fired.state.ca || '').toLowerCase() === CASHCAT_CA, fired.state.ca),
+      chk('确实向后台取了这只币的数据（预览真加载了）', callsAfter > callsBefore, [callsBefore, callsAfter]),
+    ]);
+
+    // 收尾：把预览退场、真鼠标挪走，避免影响后续步骤
+    await page.mouse.move(900, 500);
+    await sleep(600);
+  }
+
+  // --- 7 空状态 ---
+  await pushState(page, `/tokens/robinhood/${NOSTORY_CA}`);
+  await sleep(700);
+  s = await snap(page);
+  step('步骤 7 · 无叙事记录空状态', [
+    chk('展示空状态文案', s.text.includes('DeBot 还没有这只币的叙事记录'), s.text.slice(0, 60)),
+    chk('状态为 nostory', s.state.status === 'nostory', s.state.status),
+  ]);
+  await shot(page, '05-nostory.png');
+
+  // --- 8 页脚链接忽略 ---
+  const beforeFooter = (await snap(page)).state;
+  await page.hover('#footer-sol');
+  await sleep(1000); // > HOVER_DEBOUNCE_MS(600) + 取数渲染
+  s = await snap(page);
+  step('步骤 8 · 页脚行情链接不触发预览', [
+    chk('CA 未被页脚链接改写', s.state.ca === beforeFooter.ca, s.state.ca),
+    chk('未进入预览模式', s.state.mode === 'url', s.state.mode),
+  ]);
+
+  // --- 9 钱包陷阱 ---
+  await page.hover('#row-wallet-trap');
+  await sleep(1000); // > HOVER_DEBOUNCE_MS(600) + 取数渲染
+  s = await snap(page);
+  const calls = await page.evaluate(() => window.__debotCalls.slice());
+  step('步骤 9 · fiber 用户钱包陷阱不被误认成 CA', [
+    chk('未把钱包地址当成 CA', s.state.ca !== WALLET, s.state.ca),
+    chk('未向后台查询该钱包地址', !calls.some((c) => c.indexOf(WALLET) !== -1), null),
+  ]);
+
+  // --- 10 fiber 正解 ---
+  await page.hover('#row-fiber .sym');
+  await sleep(1000); // > HOVER_DEBOUNCE_MS(600) + 取数渲染
+  s = await snap(page);
+  step('步骤 10 · 无锚点行经 fiber 解析出代币 CA', [
+    chk('展示 CASHCAT', s.name.includes('CASHCAT'), s.name),
+    chk('CA 取自 fiber 的 token.ca', (s.state.ca || '').toLowerCase() === CASHCAT_CA, s.state.ca),
+  ]);
+
+  // --- 11 公开版默认：没配分析源 → 段不存在 ---
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(700);
+  s = await snap(page);
+  step('步骤 11 · 未配置分析源时「AI 判断」段整段不存在', [
+    chk('analysis 状态为 disabled', s.state.analysis === 'disabled', s.state.analysis),
+    chk('无 AI 判断标题', !s.sectionTitles.includes('AI 判断'), s.sectionTitles),
+    chk('未向后台请求分析源', !(await page.evaluate(() => window.__debotCalls.some((c) => c.indexOf('analysis-doc') === 0))), null),
+    chk('DeBot 段照常渲染', s.debotText.includes('起源'), null),
+  ]);
+
+  // --- 12 标签页结构（v0.8：五段竖排改三标签，跟 fomo 自家 tab 一个用法） ---
+  step('步骤 12 · 标签页结构：叙事(默认) / 观点 / 持仓者，各 pane 装对内容', [
+    chk('标签栏为 叙事/观点/持仓者 三个（顺序即主人定的顺序）',
+      s.tabLabels.map((t) => t.replace(/\d+$/, '')).join(',') === '叙事,观点,持仓者', s.tabLabels),
+    chk('默认标签是叙事', s.activeTab === 'narrative', s.activeTab),
+    chk('叙事 pane 可见，观点/持仓者 pane 隐藏',
+      s.paneNarrativeHidden === false && s.paneViewsHidden === true && s.paneHoldersHidden === true,
+      [s.paneNarrativeHidden, s.paneViewsHidden, s.paneHoldersHidden]),
+    chk('叙事页装 DeBot 叙事', s.debotText.includes('起源') || s.debotText.includes('评级理由'), null),
+    chk('叙事页装来源推文', s.tweetsText.includes('叙事来源推文'), s.tweetsText.slice(0, 30)),
+    chk('观点页装 thesis（隐藏但已填充）', s.thesisRows > 0, s.thesisRows),
+    chk('持仓者页装 KOL 行（隐藏但已填充）', s.kolRows > 0, s.kolRows),
+    chk('旧的段级折叠已移除（无 .collap-*）', await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      return !sh.querySelector('.collap-head') && !sh.querySelector('.collap-body');
+    }), null),
+  ]);
+  await shot(page, '06-order-no-analysis.png');
+
+  // --- 13 配置分析源（fast 档，无 creatorOpenCount → 无 Dev 行） ---
+  await page.evaluate((tpl, dtl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: dtl }), ANALYSIS_TPL, DETAIL_TPL);
+  await sleep(900);
+  s = await snap(page);
+  step('步骤 13 · 配置后经 URL 模板真实取回分析文档（fast 档）', [
+    chk('设置即时生效，无需重开卡片', s.state.analysis === 'ready', s.state.analysis),
+    chk('个人模式下星级出现', s.starsOn === 4, s.starsOn),
+    chk('评级理由依然在', s.summaries.includes('评级理由'), s.summaries),
+    chk('出现 AI 判断标题', s.sectionTitles.includes('AI 判断'), s.sectionTitles),
+    chk('oneLiner 渲染', s.analysisText.includes('只配观察不配追'), s.analysisText.slice(0, 50)),
+    chk('meme点 渲染', s.kvKeys.includes('meme点'), s.kvKeys),
+    chk('技术/红旗合并行', s.kvKeys.includes('技术 / 红旗'), s.kvKeys),
+    chk('分析源不渲染任何 Dev 开盘次数行', !s.analysisKv.some((t) => t.indexOf('Dev') === 0), s.analysisKv),
+    chk('详情链接用 {ca} 模板', s.detailLink === DETAIL_TPL.replace('{ca}', PONS_CA), s.detailLink),
+  ]);
+  await shot(page, '07-personal-analysis.png');
+
+  // --- 14 deep 文档 + meme 截断 + Dev 开盘次数 ---
+  await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
+  await sleep(900);
+  s = await snap(page);
+  step('步骤 14 · deep 文档渲染 + meme点 截断', [
+    chk('label 徽章 no_chase', s.badges.includes('no_chase'), s.badges),
+    chk('meme点 渲染 SHERWOOD 的梗', s.memeText.includes('Robin Hood 住 Sherwood Forest'), s.memeText.slice(0, 40)),
+    chk('158 字超 120 → 截断并给展开钮', s.memeMore === '展开', s.memeMore),
+    chk('即便档案里带 creatorOpenCount 也不渲染 Dev 行',
+      !s.analysisKv.some((t) => t.indexOf('Dev') === 0), s.analysisKv),
+  ]);
+  await page.evaluate(() => { const b = window.__fomoDebotTestHandle.shadow.querySelector('.memehook .more'); if (b) b.click(); });
+  await sleep(120);
+  s = await snap(page);
+  step('步骤 14b · meme点 展开后给出完整笑话', [
+    chk('展开后出现尾巴', s.memeText.includes('四个 Sherwood 在抢同一个名字心智'), null),
+    chk('按钮变为收起', s.memeMore === '收起', s.memeMore),
+  ]);
+  await shot(page, '08-analysis-deep.png');
+
+  // --- 15 身份校验 ---
+  await pushState(page, `/tokens/robinhood/${MISMATCH_CA}`);
+  await sleep(900);
+  s = await snap(page);
+  step('步骤 15 · 分析文档 address 与查询 CA 不符 → 当作没有档案', [
+    chk('状态为 absent', s.state.analysis === 'absent', s.state.analysis),
+    chk('显示"分析源里还没有这只币"', s.analysisText.includes('分析源里还没有这只币'), s.analysisText),
+    chk('不渲染别的币的结论', !s.analysisText.includes('只配观察不配追'), null),
+  ]);
+
+  // --- 16 未授权 ---
+  await page.evaluate(() => { window.__grantPerm = false; });
+  await pushState(page, `/tokens/robinhood/${NOPERM_CA}`);
+  await sleep(700);
+  s = await snap(page);
+  step('步骤 16 · 未授权访问分析源 → 明确提示去设置里重新保存', [
+    chk('状态为 error', s.state.analysis === 'error', s.state.analysis),
+    chk('提示文案正确', s.analysisText.includes('未授权访问分析源，去设置里重新保存'), s.analysisText),
+    chk('DeBot 段不受影响', s.debotText.includes('起源'), null),
+  ]);
+  await page.evaluate(() => { window.__grantPerm = true; });
+
+  // --- 17 渐进渲染 ---
+  await pushState(page, `/tokens/robinhood/${SLOW_CA}`);
+  await sleep(350);
+  const mid = await snap(page);
+  await sleep(1000);
+  s = await snap(page);
+  step('步骤 17 · 分析源慢响应不拖累 DeBot（渐进渲染）', [
+    chk('分析源还在等时 DeBot 已渲染', mid.debotText.includes('起源'), mid.debotText.slice(0, 40)),
+    chk('此刻分析段仍是读取中', mid.analysisText.includes('读取中'), mid.analysisText),
+    chk('最终分析段落地为无档案', s.analysisText.includes('分析源里还没有这只币'), s.analysisText),
+    chk('DeBot 段完好', s.debotText.includes('起源') && s.debotText.includes('评级理由'), null),
+  ]);
+
+  // --- 17b 分析源准入：只收 https 公网地址（内网/环回/明文一律不发请求） ---
+  {
+    const before = analysisHits.length;
+    await page.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: '' }), HTTP_TPL);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(800);
+    const httpSnap = await snap(page);
+    const afterHttp = analysisHits.length;
+
+    await page.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: '' }), PRIVATE_TPL);
+    await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
+    await sleep(800);
+    const privSnap = await snap(page);
+    const afterPriv = analysisHits.length;
+
+    // 回到合规的 https 公网模板，证明正常路径没被误伤
+    await page.evaluate((tpl, dtl) => window.__setSetting({ analysisTemplate: tpl, detailTemplate: dtl }), ANALYSIS_TPL, DETAIL_TPL);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const okSnap = await snap(page);
+
+    step('步骤 17b · 开关关（默认）时分析源必须是 https 公网地址：http/内网一律拦在请求之前', [
+      chk('http:// 模板被拦下', httpSnap.analysisText.includes('分析源必须是 https 公网地址'), httpSnap.analysisText),
+      chk('http:// 模板一次请求都没发出去', afterHttp === before, [before, afterHttp]),
+      chk('内网 IP 模板被拦下', privSnap.analysisText.includes('不支持内网/本地地址'), privSnap.analysisText),
+      chk('内网 IP 模板一次请求都没发出去', afterPriv === afterHttp, [afterHttp, afterPriv]),
+      chk('被拦时不泄露任何内部错误串', !LEAK_RE.test(httpSnap.text) && !LEAK_RE.test(privSnap.text), null),
+      chk('合规 https 公网模板照常取回文档', okSnap.state.analysis === 'ready', okSnap.state.analysis),
+      chk('DeBot 段全程不受影响', okSnap.debotText.includes('起源'), null),
+    ]);
+  }
+
+  // --- 17b-2 高级开关 ON：http + 内网/环回 自建分析源被放行并真的取回文档 ---
+  // 单开一个 http 页面（页面与源同为 http://127.0.0.1，同源无混合内容），
+  // 源地址 http://127.0.0.1 同时踩中"明文"与"环回"两条默认防线，开关关会被双重拦下、
+  // 开关开则放行。用它一次性证明：默认安全、开关是唯一的放行开关。
+  {
+    const beforePriv = privateHits.length;
+
+    // 先证明"开关仍关"时，这个 http 内网源照样被挡（零请求）
+    const pOff = await openPage({}, HTTP_BASE);
+    await pOff.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, allowPrivateAnalysisSource: false }), PRIVATE_HTTP_TPL);
+    await sleep(150);
+    await pushState(pOff, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const offSnap = await snap(pOff);
+    const afterOff = privateHits.length;
+    await pOff.close();
+
+    // 再打开高级开关，同一个源应被放行并成功取回
+    const pOn = await openPage({}, HTTP_BASE);
+    await pOn.evaluate((tpl) => window.__setSetting({ analysisTemplate: tpl, allowPrivateAnalysisSource: true }), PRIVATE_HTTP_TPL);
+    await sleep(150);
+    await pushState(pOn, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const onSnap = await snap(pOn);
+    const afterOn = privateHits.length;
+    await pOn.close();
+
+    step('步骤 17b-2 · 高级开关 ON → http/内网自建源被放行并真的取回文档（OFF 仍拦）', [
+      chk('开关关：http 内网源仍被拦', offSnap.analysisText.includes('分析源必须是 https 公网地址'), offSnap.analysisText),
+      chk('开关关：内网源零请求', afterOff === beforePriv, [beforePriv, afterOff]),
+      chk('开关开：内网源被放行，分析段就绪', onSnap.state.analysis === 'ready', onSnap.state.analysis),
+      chk('开关开：http 内网站点确实收到了请求', afterOn > afterOff, [afterOff, afterOn]),
+      chk('开关开：渲染出分析结论（oneLiner）', onSnap.analysisText.includes('只配观察不配追'), onSnap.analysisText.slice(0, 40)),
+      chk('DeBot / FxTwitter 主机不受开关影响（DeBot 段照常）', onSnap.debotText.includes('起源'), null),
+      chk('放行路径也不泄露任何内部串', !LEAK_RE.test(onSnap.text), (onSnap.text.match(LEAK_RE) || [])[0]),
+    ]);
+  }
+
+  // --- 17c 任何一段失败都只出一句友好灰字，绝不把内部 kind/原始错误串摊给主人 ---
+  {
+    await pushState(page, `/tokens/robinhood/${ERROR_CA}`);
+    await sleep(900);
+    const errSnap = await snap(page);
+    await pushState(page, `/tokens/robinhood/${BOOM_CA}`);
+    await sleep(1100);
+    const boomSnap = await snap(page);
+    step('步骤 17c · 错误态不泄露内部字符串（shim/kind=/HTTP 500…）', [
+      chk('DeBot 失败显示友好灰字', errSnap.debotText.includes('这段暂时读不到'), errSnap.debotText.slice(0, 60)),
+      chk('DeBot 失败仍给重试钮', errSnap.debotText.includes('重试'), errSnap.debotText.slice(0, 60)),
+      chk('整张卡片没有任何内部串', !LEAK_RE.test(errSnap.text), (errSnap.text.match(LEAK_RE) || [])[0]),
+      chk('分析源 500 也只出友好灰字', boomSnap.analysisText.includes('这段暂时读不到'), boomSnap.analysisText),
+      chk('分析源 500 不泄露 HTTP 码/后端正文', !LEAK_RE.test(boomSnap.text), (boomSnap.text.match(LEAK_RE) || [])[0]),
+      chk('五个 slot 都没有裸 kind 词',
+        ![boomSnap.debotText, boomSnap.thesisText, boomSnap.analysisText, boomSnap.kolText, boomSnap.tweetsText]
+          .some((t) => LEAK_RE.test(t)), null),
+    ]);
+  }
+
+  // 关掉分析源，回公开版，回到 PONS 让 DOM 抓取段稳定
+  await page.evaluate(() => window.__setSetting({ analysisTemplate: '', detailTemplate: '' }));
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(1000);
+  s = await snap(page);
+
+  // --- 18 持仓者页（KOL）：DOM 抓取 ---
+  step('步骤 18 · 持仓者页从页面 DOM 抓取（6 行、三段式、盈亏配色）', [
+    chk('恰好抓到 6 行（v0.7 主人要求 top 6）', s.kolRows === 6, s.kolRows),
+    chk('持仓者标签角标 = 6', s.holdersCount === '6', s.holdersCount),
+    chk('第一行 handle 正确', s.kolAuthors[0] === '@31337___', s.kolAuthors),
+    chk('仓位金额解析', s.kolPos[0] === '$29.4K', s.kolPos),
+    chk('盈亏百分比紧跟仓位', s.kolPnl[0] === '▲1,163.84%', s.kolPnl),
+    chk('4 涨 2 跌配色正确', s.kolPnlPos === 4 && s.kolPnlNeg === 2, [s.kolPnlPos, s.kolPnlNeg]),
+    chk('成本 = Avg. entry 列', s.kolCosts[0] === '成本 $0.000385', s.kolCosts),
+    chk('零网络：没有任何 fomo API 调用', !(await page.evaluate(() => window.__debotCalls.some((c) => c.indexOf('hodlers') !== -1))), null),
+  ]);
+
+  // --- 18b 三段式格式 + 列解析护栏 ---
+  step('步骤 18b · 行格式恰好三样：@名字 · 成本 $X · $仓位 ▲盈亏%', [
+    chk('整行就是主人要的三段式',
+      s.kolLines[0] === '@31337___·成本 $0.000385·$29.4K▲1,163.84%', s.kolLines[0]),
+    chk('不再出现代币数量（76.4K PONS）', !s.kolText.includes('PONS'), s.kolText.slice(0, 140)),
+    chk('不再出现持有时长（持有 2d 4h）', !/持有\s*\d/.test(s.kolText), s.kolText.slice(0, 140)),
+    chk('六个仓位值全不相同', uniq(s.kolPos).length === s.kolPos.length, s.kolPos),
+    chk('顺序 = 仓位从大到小',
+      s.kolPos.join(',') === '$29.4K,$18.4K,$9.1K,$5.3K,$2.2K,$1.4K', s.kolPos),
+    chk('无作者锚的汇总行($64.4K)没被当成持仓', !s.kolText.includes('$64.4K'), s.kolText.slice(0, 120)),
+    chk('六个作者互不相同', uniq(s.kolAuthors).length === 6, s.kolAuthors),
+    chk('没有 profile 链接的行也抓到了名字（"ogle Team 3d 1h avg. hold" → @ogle）',
+      s.kolAuthors.includes('@ogle'), s.kolAuthors),
+  ]);
+  await clickTab(page, 'holders');
+  await sleep(150);
+  await shot(page, '09-kol-scraped.png');
+  await shotClip(page, '14-kol-fixed.png', s.cardRect);
+  await clickTab(page, 'narrative');
+  await sleep(120);
+
+  // --- 19 观点页：从 Holders 表的 "Thesis" 列抓（v0.7.4 换源；v0.8 独立标签、点赞降序全量）---
+  s = await snap(page);
+  step('步骤 19 · 观点页从 Holders 表 "Thesis" 列抓（作者=持有人、点赞降序全量、去重、x.com 可点）', [
+    // 6 行里 2 行没写 thesis（跳过），4 行有；其中两条撞车去重 → 3 条，全部列出
+    chk('观点标签角标 = 3（去重后）', s.viewsCount === '3', s.viewsCount),
+    chk('全量渲染 3 条（不再只取前 2）', s.thesisRows === 3, s.thesisRows),
+    chk('作者=持有人名字，按点赞降序（@31337___ / @MEADGod / @ogle）',
+      s.thesisAuthors.join(',') === '@31337___,@MEADGod,@ogle', s.thesisAuthors),
+    chk('点赞降序排列（203 → 147 → 30）',
+      s.thesisLikes.join(',') === '♥ 203,♥ 147,♥ 30', s.thesisLikes),
+    chk('正文剥掉了前导点赞数（不以 "203 " 开头，直接是正文）',
+      (s.thesisTexts[0] || '').indexOf('You can now see which tokens') === 0, (s.thesisTexts[0] || '').slice(0, 30)),
+    chk('行头带作者仓位（fomo 同款装饰，$29.4K/$18.4K/$1.4K）',
+      s.thesisPos.join(',') === '$29.4K,$18.4K,$1.4K', s.thesisPos),
+    chk('行头带作者盈亏及配色', s.thesisPnl[0] === '▲1,163.84%'
+      && await page.evaluate(() => {
+        const sh = window.__fomoDebotTestHandle.shadow;
+        return sh.querySelectorAll('.slot-thesis .pnl.pos').length === 3;
+      }), s.thesisPnl),
+    chk('Thesis 单元格里的 x.com 链接可点', s.thesisLinks.some((u) => u && u.indexOf('https://x.com/ponsdotfamily/status/') === 0), s.thesisLinks),
+    chk('没写 thesis 的持有人被跳过（paperhands/silentbag 不出现）',
+      !s.thesisAuthors.includes('@paperhands') && !s.thesisAuthors.includes('@silentbag'), s.thesisAuthors),
+    chk('不再从左栏 Feed 抓（feed 作者 woodchopper 不出现）', !s.thesisAuthors.includes('@woodchopper'), s.thesisAuthors),
+  ]);
+
+  // --- 19b Holders 列头本身、以及左栏 "Thesis" 标签页/过滤框，都不许被当成 thesis 条目 ---
+  const decoyProbe = await page.evaluate(() => ({
+    header: !!document.querySelector('#holders .htab'),
+    filter: !!document.getElementById('filter-thesis-only'),
+    tab: !!document.getElementById('tab-thesis'),
+    headerHasThesis: Array.from(document.querySelectorAll('#holders .htab .hcol')).some((e) => e.textContent.trim() === 'Thesis'),
+  }));
+  step('步骤 19b · 列头/过滤框/标签页上的 "Thesis" 不被当成条目（只认持有人写的）', [
+    chk('三个诱饵确实存在于页面', decoyProbe.header && decoyProbe.filter && decoyProbe.tab && decoyProbe.headerHasThesis, decoyProbe),
+    chk('仍然只渲染 3 条真条目', s.thesisRows === 3, s.thesisRows),
+    chk('作者全是真实持有人（列头/标签没串进来）',
+      s.thesisAuthors.every((a) => /^@[A-Za-z0-9_]+$/.test(a)) && !s.thesisAuthors.includes('@Thesis'), s.thesisAuthors),
+    chk('没把列头文案（Trader / Avg. entry）抓进正文',
+      !/\bTrader\b/.test(s.thesisText) && !/Avg\.?\s*entry/i.test(s.thesisText), s.thesisText.slice(0, 120)),
+    chk('没抓进 "Thesis only" 过滤框文案', !/Thesis\s*only/i.test(s.thesisText), s.thesisText.slice(0, 120)),
+    chk('三条正文互不重复（撞车的已去重）', uniq(s.thesisTexts).length === s.thesisTexts.length, s.thesisTexts.length),
+  ]);
+  // v0.8 报告图：切到观点页，展示 per-holder thesis 全量点赞降序
+  await clickTab(page, 'views');
+  await sleep(150);
+  await shot(page, '10-thesis-scraped.png');
+  await shotClip(page, '19-thesis-noprofile.png', s.cardRect);
+  { const sx = await snap(page); await shotClip(page, '27-thesis-from-holders.png', sx.cardRect); }
+
+  // --- 19c 标签页交互：切换 / 角标 / 换币回默认 ---
+  {
+    await page.evaluate(() => { window.__fomoLoadLog = []; });
+    const onViews = await snap(page);   // 上面刚切到观点页
+    await clickTab(page, 'holders');
+    await sleep(300);
+    const onHolders = await snap(page);
+    const loadLog = await page.evaluate(() => (window.__fomoLoadLog || []).slice());
+    if (onViews.activeTab !== 'views' || onHolders.activeTab !== 'holders') {
+      console.log('   [19c 诊断] loadLog =', JSON.stringify(loadLog, null, 1));
+    }
+    // 换币 → 回默认叙事页
+    await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
+    await sleep(1200);
+    const afterSwitch = await snap(page);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1200);
+    step('步骤 19c · 标签切换只换 pane；换币后回到默认叙事页', [
+      chk('观点页激活时只有观点 pane 可见',
+        onViews.activeTab === 'views' && onViews.paneViewsHidden === false
+        && onViews.paneNarrativeHidden === true && onViews.paneHoldersHidden === true,
+        [onViews.activeTab, onViews.paneNarrativeHidden, onViews.paneViewsHidden, onViews.paneHoldersHidden]),
+      chk('切持仓者页后只有持仓者 pane 可见',
+        onHolders.activeTab === 'holders' && onHolders.paneHoldersHidden === false
+        && onHolders.paneViewsHidden === true && onHolders.paneNarrativeHidden === true,
+        [onHolders.activeTab, onHolders.paneHoldersHidden]),
+      chk('切换不重建内容（持仓者 6 行原样在）', onHolders.kolRows === 6, onHolders.kolRows),
+      chk('换币后回到叙事页（主人定的默认）', afterSwitch.activeTab === 'narrative', afterSwitch.activeTab),
+    ]);
+  }
+
+  // --- 20 Holders 表未渲染 → KOL 与 Thesis（同表同源）都给"滚到可见"灰字 ---
+  await page.evaluate(() => { const e = document.getElementById('holders'); if (e) { window.__savedHolders = e; e.remove(); } });
+  await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
+  await sleep(1200);
+  s = await snap(page);
+  step('步骤 20 · Holders 表未渲染 → KOL 与 Thesis 都给"滚到可见"灰字，而非报错', [
+    chk('KOL 段给出可操作灰字', s.kolText.includes('把页面的 Holders 表滚动到可见即可显示持仓'), s.kolText.slice(0, 60)),
+    chk('Thesis 段（同源）也给出"滚到可见"灰字', s.thesisText.includes('把页面的 Holders 表滚动到可见即可显示'), s.thesisText.slice(0, 80)),
+    chk('KOL 抓不到时 0 行', s.kolRows === 0, s.kolRows),
+    chk('Thesis 抓不到时 0 行', s.thesisRows === 0, s.thesisRows),
+    chk('DeBot 段不受影响', s.debotText.includes('起源') || s.debotText.includes('评级理由'), null),
+  ]);
+  await page.evaluate(() => { const m = document.querySelector('main'); if (window.__savedHolders && m) m.appendChild(window.__savedHolders); });
+
+  // --- 21 Holders 表在、但没人写 thesis → 另一句灰字（区别于"滚到可见"）---
+  await page.evaluate(() => {
+    window.__savedThesisCells = [];
+    document.querySelectorAll('#holders .hthesis').forEach((c) => {
+      window.__savedThesisCells.push([c, c.textContent]);
+      c.textContent = '';
+    });
+  });
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(1200);
+  s = await snap(page);
+  step('步骤 21 · Holders 表在、但没人写 thesis → "持有人里暂时没有写 thesis 的" 灰字', [
+    chk('Thesis 段给出改写后的灰字', s.thesisText.includes('持有人里暂时没有写 thesis 的'), s.thesisText.slice(0, 60)),
+    chk('抓不到时 0 行', s.thesisRows === 0, s.thesisRows),
+    chk('KOL 仍照常（同表，持仓不受影响）', s.kolRows === 6, s.kolRows),
+  ]);
+  await page.evaluate(() => { (window.__savedThesisCells || []).forEach(([c, t]) => { c.textContent = t; }); });
+
+  // --- 21b Holders 表晚渲染 → KOL+Thesis 两段自动补上，不许主人去点 ↻ ---
+  {
+    await page.evaluate(() => {
+      const h = document.getElementById('holders');
+      if (h) { window.__lateHolders = h; h.remove(); }
+    });
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1200);
+    const greyed = await snap(page);
+
+    // 页面"这时候才渲染出来"：把 Holders 放回去，然后什么都不点
+    await page.evaluate(() => {
+      const m = document.querySelector('main');
+      if (window.__lateHolders && m) m.appendChild(window.__lateHolders);
+    });
+    await sleep(1400);   // 只等 MutationObserver 的去抖重扫，全程零点击
+    const auto = await snap(page);
+
+    step('步骤 21b · Holders 表晚渲染 → KOL+Thesis 两段自动补上（同表同源，不用点 ↻）', [
+      chk('补上之前两段都是灰字（0 行）', greyed.thesisRows === 0 && greyed.kolRows === 0,
+        [greyed.thesisRows, greyed.kolRows]),
+      chk('晚到的 Holders 让 Thesis 自动补上（零点击）', auto.thesisRows > 0, auto.thesisRows),
+      chk('晚到的 Holders 让 KOL 自动补上（零点击）', auto.kolRows > 0, auto.kolRows),
+      chk('灰字被真数据替换掉', !auto.kolText.includes('把页面的 Holders 表滚动到可见')
+        && !auto.thesisText.includes('把页面的 Holders 表滚动到可见'),
+        [auto.kolText.slice(0, 40), auto.thesisText.slice(0, 40)]),
+      chk('全程没点过刷新钮', true, null),
+    ]);
+  }
+
+  // --- 21c 慢页面：卡片必须等 fomo 渲染完再出场，不许弹在一片黑上 ---
+  //（主人截图里的第一个症状：卡片比 fomo 自己的 React 还快，背景全黑、两段全灰字）
+  {
+    const strip = () => page.evaluate(() => {
+      const p = document.getElementById('panel');
+      const h = document.getElementById('holders');
+      if (p) { window.__slowPanel = p; p.remove(); }
+      if (h) { window.__slowHolders = h; h.remove(); }
+      return (document.body.innerText || '').length;   // 证明正文确实低于就绪阈值
+    });
+    const restore = () => page.evaluate(() => {
+      const m = document.querySelector('main');
+      if (window.__slowPanel) document.body.appendChild(window.__slowPanel);
+      if (window.__slowHolders && m) m.appendChild(window.__slowHolders);
+    });
+    const closeCard = () => page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const x = sh.querySelector('.btn.x'); if (x) x.click();
+    });
+
+    // ── A：页面一直没就绪 → 到了上限也必须照常出场（宁可早出，不能不出）
+    const bodyLen = await strip();
+    await closeCard();
+    await sleep(200);
+    await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
+    await sleep(700);                       // < 上限(1500ms)，此刻应当还在等
+    const waitingA = await snap(page);
+    await sleep(1600);                      // 越过上限
+    const cappedA = await snap(page);
+
+    // ── B：等待期间页面渲染出来 → 立刻出场，并且两段直接带着真数据
+    await closeCard();
+    await sleep(200);
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(700);
+    const waitingB = await snap(page);
+    await restore();                        // fomo 这时候才画完
+    await sleep(900);
+    const readyB = await snap(page);
+
+    step('步骤 21c · 慢页面：卡片等页面渲染好再出场（上限 1.5s 兜底）', [
+      chk('夹具确实把页面压到"未就绪"（正文 < 500 字且无左栏）', bodyLen < 500, bodyLen),
+      chk('A 页面没就绪时卡片先不出场', waitingA.visible === false, waitingA.visible),
+      chk('A 但状态已经在载入（数据没等页面）', waitingA.state.open === true, waitingA.state.open),
+      chk('A 到了上限照常出场', cappedA.visible === true, cappedA.visible),
+      chk('B 等待期间同样不出场', waitingB.visible === false, waitingB.visible),
+      chk('B 页面渲染完后卡片出场', readyB.visible === true, readyB.visible),
+      chk('B 出场时 Thesis 已经是真数据，不是灰字', readyB.thesisRows > 0, readyB.thesisRows),
+      chk('B 出场时 KOL 已经是真数据，不是灰字', readyB.kolRows > 0, readyB.kolRows),
+      chk('B 出场后停靠位仍贴着左栏面板右缘',
+        !!readyB.cardRect && !!readyB.panelRect && readyB.cardRect.left === readyB.panelRect.right + 8,
+        [readyB.cardRect && readyB.cardRect.left, readyB.panelRect && readyB.panelRect.right]),
+    ]);
+    // 整页截图：对照主人那张"背景全黑 + 两段灰字"的截图，这里页面已经画完、卡片才出场
+    await shot(page, '20-slow-page-populated.png');
+    await clickTab(page, 'holders');
+    await sleep(150);
+    await shotClip(page, '21-slow-page-kol.png', readyB.cardRect);
+    await clickTab(page, 'narrative');
+    await sleep(100);
+  }
+
+  // --- 22 autoOpen：SPA 内 URL 变化（仅靠 800ms 轮询）自动开卡 ---
+  await page.evaluate(() => {
+    const sh = window.__fomoDebotTestHandle.shadow;
+    const x = sh.querySelector('.btn.x'); if (x) x.click(); // 关卡
+  });
+  await sleep(200);
+  const closed = await snap(page);
+  // 用未打补丁的原生 pushState 改 URL —— 不触发 LOC_EVENT，只能靠轮询发现
+  await page.evaluate((ca) => window.__origPush({}, '', '/tokens/robinhood/' + ca), CASHCAT_CA);
+  await sleep(700); // > 250ms 轮询周期（v0.7 从 800ms 提速）
+  s = await snap(page);
+  step('步骤 22 · autoOpen：SPA URL 变化经 250ms 轮询自动开卡（无需点击）', [
+    chk('改 URL 前卡片确已关闭', closed.visible === false, closed.visible),
+    chk('轮询后卡片自动可见', s.visible === true, s.visible),
+    chk('自动加载了新代币', (s.state.ca || '').toLowerCase() === CASHCAT_CA, s.state.ca),
+  ]);
+
+  // --- 22b 进新币不许先看到上一只币（v0.7 主人反馈） ---
+  {
+    // 先把卡片停在 PONS，并确认它确实显示 PONS
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const onPons = await snap(page);
+
+    // ① 轮询路径：用未打补丁的原生 pushState 换 URL，只能靠轮询发现。
+    //    250ms 轮询 + 立刻清场 → 400ms 内卡片必须已经是新币，且不残留旧币内容。
+    await page.evaluate((ca) => window.__origPush({}, '', '/tokens/robinhood/' + ca), CASHCAT_CA);
+    await sleep(400);
+    const afterPoll = await snap(page);
+
+    // ② 点击路径：点左栏代币行应当立刻切换，不必等轮询
+    // 模拟 fomo 的前端路由：拦掉整页跳转，但把 URL 推成被点的那只币
+    //（用未打补丁的 __origPush，确保切换是"点击那条路"立刻生效的，而不是靠事件补丁）
+    await page.evaluate(() => {
+      if (window.__spaRouterInstalled) return;
+      window.__spaRouterInstalled = true;
+      document.addEventListener('click', (e) => {
+        const a = e.target && e.target.closest && e.target.closest('a[href^="/tokens/"]');
+        if (!a) return;
+        e.preventDefault();
+        window.__origPush({}, '', a.getAttribute('href'));
+      }, true);
+    });
+    // 探针：确认点击确实落在一个能解析出 PONS 的 /tokens/ 锚点上
+    const clickProbe = await page.evaluate(() => {
+      const a = document.querySelector('#row-anchor-pons a');
+      return a ? { href: a.getAttribute('href'), tag: a.tagName } : null;
+    });
+    await page.click('#row-anchor-pons a');
+    await sleep(60);
+    const rightAfterClick = await snap(page);
+    await sleep(700);
+    const settled = await snap(page);
+
+    step('步骤 22b · 换币立刻清场：不会先看到上一只币的卡片', [
+      chk('起点确实是 PONS', onPons.name.includes('PONS'), onPons.name),
+      chk('轮询 400ms 内已切到新币', (afterPoll.state.ca || '').toLowerCase() === CASHCAT_CA, afterPoll.state.ca),
+      chk('轮询切换后卡片不再显示上一只币的名字',
+        !afterPoll.name.includes('PONS'), afterPoll.name),
+      chk('轮询切换后不残留上一只币的正文',
+        !afterPoll.debotText.includes('去中心化发币基础设施'), afterPoll.debotText.slice(0, 60)),
+      chk('点击代币行后 60ms 内就已不是上一只币（不等轮询）',
+        !rightAfterClick.name.includes('CASHCAT'),
+        [rightAfterClick.name, rightAfterClick.state.ca, rightAfterClick.state.mode,
+         rightAfterClick.state.status, clickProbe]),
+      chk('点击后落地到点的那只币', (settled.state.ca || '').toLowerCase() === PONS_CA, settled.state.ca),
+      chk('点代币行不会把卡片关掉', settled.visible === true, settled.visible),
+    ]);
+  }
+
+  // --- 23 来源推文折叠 ---
+  await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+  await sleep(900);
+  s = await snap(page);
+  step('步骤 23 · 来源推文整段默认折叠', [
+    chk('details 默认收起', s.tweetsOpen === false, s.tweetsOpen),
+    chk('摘要显示总条数', s.tweetsSummary.includes('叙事来源推文（39 条）'), s.tweetsSummary),
+  ]);
+  await page.evaluate(() => { const d = window.__fomoDebotTestHandle.shadow.querySelector('details.tweets'); if (d) d.open = true; });
+  await sleep(150);
+  s = await snap(page);
+  step('步骤 23b · 展开后 1 条直出、其余折叠', [
+    chk('直出 1 条', s.tweetsVisibleRows === 1, s.tweetsVisibleRows),
+    chk('其余 1 条收进"更多"（中间那条 404 被跳过）', s.tweetsMoreRows === 1, s.tweetsMoreRows),
+    chk('正文来自真实 fixture', s.tweetsText.includes('Another listing on the watch'), s.tweetsText.slice(0, 60)),
+    chk('打开推文链接被规范化为 x.com/i/status/<id>（不信第三方回的 url 字段）',
+      s.tweetLinks.every((u) => /^https:\/\/x\.com\/i\/status\/\d+$/.test(u))
+      && s.tweetLinks.includes('https://x.com/i/status/2093207087069176051'), s.tweetLinks),
+  ]);
+  await scrollToSlot(page, 'tweets');
+  await sleep(120);
+  await shot(page, '11-tweets.png');
+
+  // --- 24 翻译降级（无 Translator API）：段内无任何译按钮/提示条，原文照常显示 ---
+  s = await snap(page);
+  step('步骤 24 · 无 Translator API：段内不再有译按钮/提示条，原文照常显示', [
+    chk('此上下文确无 Translator API', s.hasTranslatorApi === false, s.hasTranslatorApi),
+    chk('段内已无译按钮(.tbtn)', s.trBtn === null, s.trBtn),
+    chk('全卡无翻译提示条(.tprompt)', s.promptShown === 0 && s.prompts.length === 0, s.prompts),
+    chk('英文原文照常显示', s.thesisText.includes('You can now see which tokens'), s.thesisText.slice(0, 80)),
+  ]);
+
+  // --- 24b 点卡片外关闭（卡片压在图表上，主人想看图不该只能去按 ×） ---
+  {
+    // 左栏那一行是真锚点：沿用上面装好的 SPA 路由模拟（拦跳转 + 推 URL）
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(800);
+
+    // ① 点卡片内部（头部）不该关
+    await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const n = sh.querySelector('.name');
+      if (n) n.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    });
+    await sleep(150);
+    const afterInside = await snap(page);
+
+    // ② 点左栏可悬停的代币行不该关（那是在切币）
+    await page.click('#row-anchor-pons');
+    await sleep(200);
+    const afterRow = await snap(page);
+
+    // ③ 点图表区（卡片外）应当关闭
+    await page.mouse.click(900, 400);
+    await sleep(200);
+    const afterOutside = await snap(page);
+
+    step('步骤 24b · 点卡片外关闭；点卡片内/左栏行/圆钮不关', [
+      chk('点卡片内部不关', afterInside.visible === true, afterInside.visible),
+      chk('点左栏代币行不关', afterRow.visible === true, afterRow.visible),
+      chk('点图表区（卡片外）关闭', afterOutside.visible === false, afterOutside.visible),
+      chk('关闭后圆钮回来', await page.evaluate(() => {
+        const sh = window.__fomoDebotTestHandle.shadow;
+        const l = sh.querySelector('.launcher');
+        return !!l && !l.hidden;
+      }), null),
+    ]);
+    // 点圆钮重新开卡，且这一下不该被"点外部"逻辑吃掉
+    await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const l = sh.querySelector('.launcher');
+      if (l) l.click();
+    });
+    await sleep(700);
+    const afterLauncher = await snap(page);
+    step('步骤 24c · 点圆钮重新开卡（圆钮点击不被当成卡外点击）', [
+      chk('卡片重新可见', afterLauncher.visible === true, afterLauncher.visible),
+      chk('回到当前 URL 的代币', (afterLauncher.state.ca || '').toLowerCase() === PONS_CA, afterLauncher.state.ca),
+    ]);
+  }
+
+  // --- 24d/e/f/g/h/i 中文翻译各路径（各起一个独立页面，Translator 状态不可复用）。
+  //     v0.7.3：段内译按钮/提示条全部移除，头部 中/EN 钮是唯一翻译开关。 ---
+  {
+    // ① 语言包已就绪 → 无需点击，直接翻（头部钮不必碰）
+    const pAuto = await openPage({ translator: 'available' });
+    await pushState(pAuto, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1800);
+    const auto = await snap(pAuto);
+    step('步骤 24d · 中文模式 + 语言包就绪 → 自动翻译，零点击（无提示条无译按钮）', [
+      chk('Translator 桩已装上', auto.hasTranslatorApi === true, auto.hasTranslatorApi),
+      chk('英文 thesis 已被替换成译文', (auto.thesisTexts[0] || '').indexOf('【译】') === 0, (auto.thesisTexts[0] || '').slice(0, 40)),
+      chk('不再直出未翻译的原文', !/^You can now see/.test(auto.thesisTexts[0] || ''),
+        (auto.thesisTexts[0] || '').slice(0, 30)),
+      chk('已是中文的那条不重复翻译',
+        (auto.thesisTexts[1] || '').includes('发币权真的开放出去了') && (auto.thesisTexts[1] || '').indexOf('【译】') !== 0,
+        (auto.thesisTexts[1] || '').slice(0, 30)),
+      chk('全卡无翻译提示条(.tprompt)', auto.promptShown === 0 && auto.prompts.length === 0, auto.prompts),
+      chk('段内无译按钮(.tbtn)', auto.trBtn === null, auto.trBtn),
+      chk('翻译已开启（头部钮为唯一开关）', auto.state.translating === true, auto.state.translating),
+      chk('当前语言高亮为「中」', auto.langActive === '中', auto.langActive),
+      chk('DeBot 中文叙事不进翻译（还是原样中文）', auto.debotText.indexOf('【译】') === -1, null),
+      chk('全程没人点过任何东西', await pAuto.evaluate(() => window.__translatorCreated) === 1, null),
+    ]);
+    await clickTab(pAuto, 'views');
+    await sleep(150);
+    await shot(pAuto, '13-zh-auto-translated.png');
+
+    // 点头部 中/EN 钮切到 EN → 立刻回原文（唯一开关）
+    await pAuto.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const b = sh.querySelector('.btn.lang'); if (b) b.click();
+    });
+    await sleep(300);
+    const reverted = await snap(pAuto);
+    step('步骤 24e · 点头部 中/EN 钮切 EN → 一键回原文（段内不再有独立译按钮）', [
+      chk('切回英文原文', (reverted.thesisTexts[0] || '').includes('You can now see which tokens'), (reverted.thesisTexts[0] || '').slice(0, 40)),
+      chk('语言高亮切到 EN', reverted.langActive === 'EN', reverted.langActive),
+      chk('翻译已关闭', reverted.state.translating === false, reverted.state.translating),
+      chk('段内仍无译按钮(.tbtn)', reverted.trBtn === null, reverted.trBtn),
+    ]);
+    await pAuto.close();
+
+    // ② 语言包待下载 + 中文模式：不弹提示条、不擅自下载，先显示原文（不打扰）
+    const pPrompt = await openPage({ translator: 'downloadable' });
+    await pushState(pPrompt, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1800);
+    const prompted = await snap(pPrompt);
+    step('步骤 24f · 语言包待下载：不弹提示条、不擅自下载，原文照常显示', [
+      chk('全卡无翻译提示条(.tprompt)', prompted.promptShown === 0 && prompted.prompts.length === 0, prompted.prompts),
+      chk('段内无译按钮(.tbtn)', prompted.trBtn === null, prompted.trBtn),
+      chk('没点之前不擅自创建翻译器', await pPrompt.evaluate(() => window.__translatorCreated) === 0, null),
+      chk('翻译未开启', prompted.state.translating === false, prompted.state.translating),
+      chk('头部中/EN 钮在（唯一翻译入口）', prompted.langBtn !== null, prompted.langBtn),
+      chk('原文照常显示', (prompted.thesisTexts[0] || '').includes('You can now see which tokens'), (prompted.thesisTexts[0] || '').slice(0, 40)),
+      chk('没有报错灰字', !LEAK_RE.test(prompted.text), null),
+    ]);
+    await shotClip(pPrompt, '16-translate-prompt.png', prompted.cardRect);
+
+    // 点头部钮：中→EN（原文），再 EN→中（这一下是用户手势）→ 触发下载+翻译
+    await pPrompt.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const b = sh.querySelector('.btn.lang'); if (b) b.click();   // 中 → EN
+    });
+    await sleep(150);
+    await pPrompt.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const b = sh.querySelector('.btn.lang'); if (b) b.click();   // EN → 中（用户手势）
+    });
+    await sleep(700);
+    const accepted = await snap(pPrompt);
+    const readyFlag = await pPrompt.evaluate(() => new Promise((r) => chrome.storage.local.get({ translatorReady: false }, (v) => r(v.translatorReady))));
+    step('步骤 24g · 点头部「中」(用户手势) → 下载语言包并开翻，并记住已就绪', [
+      chk('译文落地', (accepted.thesisTexts[0] || '').indexOf('【译】') === 0, (accepted.thesisTexts[0] || '').slice(0, 40)),
+      chk('翻译已开启', accepted.state.translating === true, accepted.state.translating),
+      chk('确实触发过一次创建（下载语言包）', await pPrompt.evaluate(() => window.__translatorCreated) >= 1, null),
+      chk('仍无提示条', accepted.promptShown === 0 && accepted.prompts.length === 0, accepted.prompts),
+      chk('translatorReady 已写入 storage.local', readyFlag === true, readyFlag),
+    ]);
+    await pPrompt.close();
+
+    // ③ 上次下过语言包（storage.local 有标记）→ 即便 availability 还是 downloadable 也自动开
+    const pRemember = await openPage({ translator: 'downloadable', localSeed: { translatorReady: true } });
+    await pushState(pRemember, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1800);
+    const remembered = await snap(pRemember);
+    step('步骤 24h · 记得语言包下过 → 直接自动创建，不再打扰主人（零点击、无提示条）', [
+      chk('译文落地', (remembered.thesisTexts[0] || '').indexOf('【译】') === 0, (remembered.thesisTexts[0] || '').slice(0, 40)),
+      chk('翻译已开启', remembered.state.translating === true, remembered.state.translating),
+      chk('全卡无翻译提示条(.tprompt)', remembered.promptShown === 0 && remembered.prompts.length === 0, remembered.prompts),
+    ]);
+    await pRemember.close();
+
+    // ④ 自动创建被浏览器以缺手势拒绝 → 静默退回原文（不弹提示条、不报错、头部钮仍可再点）
+    const pDenied = await openPage({ translator: 'downloadable', localSeed: { translatorReady: true }, createThrows: 'NotAllowedError' });
+    await pushState(pDenied, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1800);
+    const denied = await snap(pDenied);
+    step('步骤 24i · 自动创建被判缺手势(NotAllowedError) → 静默退回原文，不弹提示条不报错', [
+      chk('确实尝试过自动创建', await pDenied.evaluate(() => window.__translatorCreated) >= 1, null),
+      chk('缺手势被拒后不弹提示条', denied.promptShown === 0 && denied.prompts.length === 0, denied.prompts),
+      chk('翻译未开启', denied.state.translating === false, denied.state.translating),
+      chk('原文照常显示', (denied.thesisTexts[0] || '').includes('You can now see which tokens'), null),
+      chk('头部中/EN 钮仍在（可手动再点触发）', denied.langBtn !== null, denied.langBtn),
+      chk('卡片上没有任何报错串', !LEAK_RE.test(denied.text), null),
+    ]);
+    await pDenied.close();
+
+    // ⑤ 英文模式不自动翻（主人选了英文就给英文）
+    const pEn = await openPage({ translator: 'available' });
+    await pEn.evaluate(() => window.__setSetting({ lang: 'en' }));
+    await sleep(200);
+    await pushState(pEn, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1300);
+    const en = await snap(pEn);
+    step('步骤 24j · 英文模式不自动翻译，也不出提示条', [
+      chk('thesis 保持原文', (en.thesisTexts[0] || '').includes('You can now see which tokens'), (en.thesisTexts[0] || '').slice(0, 40)),
+      chk('没有提示条', en.promptShown === 0, en.prompts),
+    ]);
+    await pEn.close();
+  }
+
+  // --- 25 设置面板 ---
+  const pop = await browser.newPage();
+  await pop.setViewport({ width: 340, height: 660 });
+  await pop.evaluateOnNewDocument(() => {
+    const store = {};
+    window.chrome = {
+      storage: { sync: {
+        get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in store) ? store[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
+        set(o, cb) { Object.assign(store, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+      } },
+      permissions: { request: () => Promise.resolve(true), contains: () => Promise.resolve(true) },
+    };
+  });
+  await pop.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await pop.setContent(fs.readFileSync(path.join(EXT_DIR, 'popup.html'), 'utf8')
+    .replace('<script src="popup.js"></script>', '<script>' + fs.readFileSync(path.join(EXT_DIR, 'popup.js'), 'utf8') + '</script>'));
+  await sleep(250);
+  const popOk = await pop.evaluate(() => !!document.getElementById('analysisTemplate'));
+  step('步骤 25 · 设置面板渲染（通用 + 数据源两组）', [
+    chk('分析源模板输入框存在', popOk, popOk),
+    chk('两组标题齐全', await pop.evaluate(() => Array.from(document.querySelectorAll('.gtitle')).map((g) => g.textContent).join(',') === '通用,数据源'), null),
+  ]);
+  await shot(pop, '12-settings.png');
+
+  // 设置面板同样守住"开关关只收 https 公网地址、开关开才放行 http/内网"这条线
+  const popV = await pop.evaluate(async () => {
+    const out = {};
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const setToggle = (on) => { document.getElementById('allowPrivate').checked = on; };
+    const save = async (v, ms) => {
+      document.getElementById('analysisTemplate').value = v;
+      document.getElementById('save').click();
+      await wait(ms);
+      return document.getElementById('msg').textContent;
+    };
+    // 开关关（默认）
+    setToggle(false);
+    out.noPlaceholder = await save('https://example.com/data.json', 60);
+    out.http = await save('http://example.com/{ca}.json', 60);
+    out.priv = await save('https://192.168.1.5/{ca}.json', 60);
+    out.loopback = await save('https://localhost/{ca}.json', 60);
+    out.ok = await save('https://example.com/{ca}.json', 200);
+    // 开关开
+    setToggle(true);
+    out.onHttp = await save('http://192.168.1.5/{ca}.json', 200);
+    out.onLoopback = await save('http://127.0.0.1:8899/{ca}.json', 200);
+    out.onNoPlaceholder = await save('http://192.168.1.5/data.json', 60); // 仍必须含 {ca}
+    out.onBadScheme = await save('ftp://192.168.1.5/{ca}.json', 60);       // 仍必须 http(s)
+    // 开关开也读回持久化的 toggle
+    out.persisted = await new Promise((r) => chrome.storage.sync.get({ allowPrivateAnalysisSource: false }, (s) => r(s.allowPrivateAnalysisSource)));
+    return out;
+  });
+  step('步骤 25b · 设置面板：开关关拒绝 http/内网/环回，开关开放行 http/内网', [
+    chk('缺 {ca} 被拦', popV.noPlaceholder.includes('要含 {ca}'), popV.noPlaceholder),
+    chk('开关关：http 被拦', popV.http.includes('必须是 https 公网地址'), popV.http),
+    chk('开关关：内网 IP 被拦', popV.priv.includes('必须是 https 公网地址'), popV.priv),
+    chk('开关关：localhost 被拦', popV.loopback.includes('必须是 https 公网地址'), popV.loopback),
+    chk('开关关：合规地址可保存', popV.ok.includes('已保存'), popV.ok),
+    chk('开关开：http 内网源可保存', popV.onHttp.includes('已保存'), popV.onHttp),
+    chk('开关开：http 环回源可保存', popV.onLoopback.includes('已保存'), popV.onLoopback),
+    chk('开关开：仍要求含 {ca}', popV.onNoPlaceholder.includes('要含 {ca}'), popV.onNoPlaceholder),
+    chk('开关开：ftp 之类非 http(s) 仍被拦', popV.onBadScheme.includes('http(s)'), popV.onBadScheme),
+    chk('开关状态被持久化', popV.persisted === true, popV.persisted),
+  ]);
+  await shot(pop, '18-settings-advanced.png');
+  await pop.close();
+
+  // --- 28 compact 默认：自动弹出但精简（v0.7.2 新增） ---
+  {
+    const pC = await openPage(); // 无 openMode/autoOpen → resolveOpenMode 回落 compact
+    await pushState(pC, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const c = await snap(pC);
+    const dfind = (t) => (c.debotSections || []).find((x) => x.title === t);
+    step('步骤 28 · compact 默认：自动弹出但精简（起源/评级理由展开，细节收起；标签页照常）', [
+      chk('openMode 解析为 compact', c.state.openMode === 'compact', c.state.openMode),
+      chk('卡片自动弹出可见', c.visible === true, c.visible),
+      chk('本次为精简布局', c.state.compact === true, c.state.compact),
+      chk('默认标签是叙事', c.activeTab === 'narrative', c.activeTab),
+      chk('起源默认展开', !!dfind('起源') && dfind('起源').open === true, dfind('起源')),
+      chk('评级理由默认展开', !!dfind('评级理由') && dfind('评级理由').open === true, dfind('评级理由')),
+      chk('传播默认收起', !!dfind('传播') && dfind('传播').open === false, dfind('传播')),
+      chk('开发者默认收起', !!dfind('开发者') && dfind('开发者').open === false, dfind('开发者')),
+      chk('来源推文段收起', c.tweetsOpen === false, c.tweetsOpen),
+      // 标签页不影响抓取：观点/持仓者 pane 隐藏但内容已填好
+      chk('观点页内容已填好（3 条）', c.thesisRows === 3, c.thesisRows),
+      chk('持仓者页内容已填好（6 行）', c.kolRows === 6, c.kolRows),
+      chk('隐藏 pane 里的头号持仓作者可读', c.kolAuthors[0] === '@31337___', c.kolAuthors),
+      chk('隐藏 pane 里的 thesis 作者可读', c.thesisAuthors.join(',') === '@31337___,@MEADGod,@ogle', c.thesisAuthors),
+    ]);
+    await shot(pC, '22-compact-autoopen.png');
+
+    // 点观点标签即切换，内容立刻可见（证明隐藏只是没显示、不是没抓）
+    await clickTab(pC, 'views');
+    await sleep(150);
+    const cx = await snap(pC);
+    step('步骤 28b · 点观点标签即切换、内容立即可见', [
+      chk('观点 pane 可见', cx.activeTab === 'views' && cx.paneViewsHidden === false,
+        [cx.activeTab, cx.paneViewsHidden]),
+      chk('切换后 thesis 行仍在（3 条）', cx.thesisRows === 3, cx.thesisRows),
+      chk('切换后能读到真实正文', cx.thesisTexts.some((t) => /You can now see which tokens|发币权真的开放出去了/.test(t)),
+        cx.thesisTexts.map((t) => t.slice(0, 24))),
+    ]);
+    await shotClip(pC, '24-compact-expanded.png', cx.cardRect);
+    await pC.close();
+  }
+
+  // --- 29 full 模式：自动弹出且全部展开 ---
+  {
+    const pF = await openPage({ syncSeed: { openMode: 'full' } });
+    await pushState(pF, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const f = await snap(pF);
+    const ffind = (t) => (f.debotSections || []).find((x) => x.title === t);
+    step('步骤 29 · full 模式：自动弹出且叙事页全摊开（传播/开发者/来源推文）', [
+      chk('openMode 为 full', f.state.openMode === 'full', f.state.openMode),
+      chk('卡片可见', f.visible === true, f.visible),
+      chk('本次非精简布局', f.state.compact === false, f.state.compact),
+      chk('默认标签仍是叙事（full 只管叙事页内部展开态）', f.activeTab === 'narrative', f.activeTab),
+      chk('来源推文段展开', f.tweetsOpen === true, f.tweetsOpen),
+      chk('传播段也展开（full 全摊开）', !!ffind('传播') && ffind('传播').open === true, ffind('传播')),
+      chk('内容都在（thesis 3 / kol 6）', f.thesisRows === 3 && f.kolRows === 6, [f.thesisRows, f.kolRows]),
+    ]);
+    await pF.close();
+  }
+
+  // --- 30 off 模式：不自动弹出，只有点"叙"钮才现身 ---
+  {
+    const pO = await openPage();
+    await pO.evaluate(() => window.__setSetting({ openMode: 'off' }));
+    await sleep(200);
+    await pushState(pO, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const before = await snap(pO);
+    await pO.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const l = sh.querySelector('.launcher'); if (l) l.click();
+    });
+    await sleep(1000);
+    const after = await snap(pO);
+    step('步骤 30 · off 模式：代币页不自动弹出；点右下角"叙"钮才显示（全展开）', [
+      chk('openMode 为 off', before.state.openMode === 'off', before.state.openMode),
+      chk('代币页未自动弹出', before.visible === false, before.visible),
+      chk('未自动进入 open 态', before.state.open === false, before.state.open),
+      chk('"叙"钮此时可见', before.launcherVisible === true, before.launcherVisible),
+      chk('点钮后卡片可见', after.visible === true, after.visible),
+      chk('点钮打开的是当前 URL 的币', (after.state.ca || '').toLowerCase() === PONS_CA, after.state.ca),
+      chk('手动打开用全展开布局（off→full）', after.state.compact === false, after.state.compact),
+    ]);
+    await pO.close();
+  }
+
+  // --- 31 迁移：老 autoOpen 布尔 → openMode（内容脚本侧） ---
+  {
+    const pMoff = await openPage({ syncSeed: { autoOpen: false } }); // 无 openMode
+    await pushState(pMoff, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const moff = await snap(pMoff);
+    const pMon = await openPage({ syncSeed: { autoOpen: true } });
+    await pushState(pMon, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const mon = await snap(pMon);
+    step('步骤 31 · 迁移：老 autoOpen 映射到 openMode（true→compact / false→off）', [
+      chk('autoOpen:false → openMode off', moff.state.openMode === 'off', moff.state.openMode),
+      chk('autoOpen:false → 不自动弹出', moff.visible === false, moff.visible),
+      chk('autoOpen:true → openMode compact', mon.state.openMode === 'compact', mon.state.openMode),
+      chk('autoOpen:true → 自动弹出且精简', mon.visible === true && mon.state.compact === true,
+        [mon.visible, mon.state.compact]),
+    ]);
+    await pMoff.close();
+    await pMon.close();
+  }
+
+  // --- 32 设置面板：自动弹出模式下拉 + 迁移显示 ---
+  {
+    const pp1 = await openPopup({});
+    const v1 = await pp1.evaluate(() => ({
+      hasSelect: !!document.getElementById('openMode'),
+      noAutoOpenCheckbox: !document.getElementById('autoOpen'),
+      options: Array.from(document.getElementById('openMode').options).map((o) => o.value + ':' + o.textContent),
+      value: document.getElementById('openMode').value,
+      titlesJoin: Array.from(document.querySelectorAll('.gtitle')).map((g) => g.textContent).join(','),
+    }));
+    step('步骤 32 · 设置面板：自动弹出模式下拉（三档中文标签，替换旧 autoOpen 勾选框）', [
+      chk('openMode 下拉存在', v1.hasSelect, v1.hasSelect),
+      chk('旧的 autoOpen 勾选框已移除', v1.noAutoOpenCheckbox, v1.noAutoOpenCheckbox),
+      chk('三档齐全且标签正确',
+        v1.options.join('|') === 'compact:精简展开（只显示起源+评级理由）|full:全部展开|off:不自动弹出（点右下角按钮才显示）',
+        v1.options),
+      chk('默认选中 compact', v1.value === 'compact', v1.value),
+      chk('两组标题仍是 通用,数据源', v1.titlesJoin === '通用,数据源', v1.titlesJoin),
+    ]);
+    await shot(pp1, '23-settings-openmode.png');
+
+    const savedFull = await pp1.evaluate(async () => {
+      const s = document.getElementById('openMode');
+      s.value = 'full'; s.dispatchEvent(new Event('change'));
+      await new Promise((r) => setTimeout(r, 80));
+      return new Promise((r) => chrome.storage.sync.get({ openMode: null }, (v) => r(v.openMode)));
+    });
+    const ppOff = await openPopup({ autoOpen: false });
+    const offVal = await ppOff.evaluate(() => document.getElementById('openMode').value);
+    const ppOn = await openPopup({ autoOpen: true });
+    const onVal = await ppOn.evaluate(() => document.getElementById('openMode').value);
+    step('步骤 32b · 设置面板：改档写 openMode；老 autoOpen 迁移到正确档位显示', [
+      chk('改选"全部展开"写入 openMode=full', savedFull === 'full', savedFull),
+      chk('老 autoOpen:false → 下拉迁移显示 off', offVal === 'off', offVal),
+      chk('老 autoOpen:true → 下拉迁移显示 compact', onVal === 'compact', onVal),
+    ]);
+    await pp1.close();
+    await ppOff.close();
+    await ppOn.close();
+  }
+
+} catch (e) {
+  failures++;
+  console.log('FAIL  测试执行异常:', e && e.stack ? e.stack : e);
+} finally {
+  await browser.close();
+  server.close();
+  httpServer.close();
+}
+
+// --- 26 私有信息门禁 ---
+{
+  const SHIPPED = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'README.md'];
+  const BANNED = /黑柴|作战台|100\.121\.107\.107|second-leg|prod-api\.fomo|openclaw|home-node/i;
+  const hits = [];
+  for (const f of SHIPPED) {
+    const body = fs.readFileSync(path.join(EXT_DIR, f), 'utf8');
+    body.split('\n').forEach((line, i) => { if (BANNED.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 60)}`); });
+  }
+  step('步骤 26 · 发布文件不含任何私有标识/内网地址/已废弃 fomo API', [
+    chk('六个发布文件全部干净', hits.length === 0, hits),
+  ]);
+}
+
+// --- 27 静态自检：manifest 版本 / 权限面 ---
+{
+  const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
+  step('步骤 27 · manifest 可解析、版本 0.8.0、可选授权含 http+https（高级开关需要）', [
+    chk('版本号为 0.8.0', mf.version === '0.8.0', mf.version),
+    chk('optional_host_permissions 含 https 通配',
+      Array.isArray(mf.optional_host_permissions)
+      && mf.optional_host_permissions.indexOf('https://*/*') !== -1, mf.optional_host_permissions),
+    chk('optional_host_permissions 含 http 通配（放行内网自建源的授权前提）',
+      Array.isArray(mf.optional_host_permissions)
+      && mf.optional_host_permissions.indexOf('http://*/*') !== -1, mf.optional_host_permissions),
+    chk('固定 host 授权仍只有 DeBot + FxTwitter 三个公网 https 源',
+      Array.isArray(mf.host_permissions)
+      && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*',
+      mf.host_permissions),
+    chk('内容脚本仍只注入 fomo.family',
+      mf.content_scripts[0].matches.join(',') === 'https://fomo.family/*', mf.content_scripts[0].matches),
+  ]);
+}
+
+console.log('----');
+console.log(`${stepLog.filter((x) => x.ok).length}/${stepLog.length} 步通过，失败计数 ${failures}`);
+process.exit(failures === 0 ? 0 : 1);

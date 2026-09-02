@@ -1,0 +1,112 @@
+{
+  "schema": "second-leg-ca-dossier-v1",
+  "address": "0xf8bc08092c06db6148114dcf82af881f1085f92b",
+  "chain": "robinhood",
+  "symbol": "WOOD",
+  "name": "Sherwood Protocol",
+  "mode": "fast",
+  "createdAt": "2026-08-31T23:12:33+08:00",
+  "updatedAt": "2026-08-31T23:14:07.609933+08:00",
+  "quant": {
+    "marketCap": 9310854.8,
+    "price": 0.0093108548,
+    "totalSupply": 1000000000.0,
+    "liquidity": 541467.5080206889,
+    "holderCount": 42300,
+    "firstLegHighMc": 30801760.0,
+    "drawdownFromHighPct": 69.77,
+    "kol": {
+      "tagged": 14,
+      "activeHolders": 1,
+      "marketBuyers": 1,
+      "transferOnly": 0,
+      "meaningfulBuyers": 0,
+      "visibleBuyUsd": 499.6404492599452,
+      "retentionPct": 70.62,
+      "costBasisMc": 15493569.828862652,
+      "exited": 11,
+      "strengthScore20": 8,
+      "meaningfulUsdThreshold": 4655.4274000000005
+    },
+    "tape": {
+      "volume24h": 369071.49929569,
+      "vwap72h": null,
+      "klineSummary": ""
+    },
+    "security": {
+      "isHoneypot": false,
+      "canNotSell": 0,
+      "isOpenSource": true,
+      "isRenounced": true,
+      "isBlacklist": false,
+      "buyTaxPct": 0.0,
+      "sellTaxPct": 0.0,
+      "top10HolderPct": 0.3631,
+      "bundlerPct": 0.0124,
+      "entrapmentPct": 0.5042,
+      "ratTraderPct": 0.0017,
+      "devTeamHoldPct": 0.0,
+      "freshWalletPct": 0.0179,
+      "creatorStatus": "creator_close",
+      "liquidityLocked": true,
+      "flags": []
+    },
+    "links": {
+      "gmgn": "https://gmgn.ai/robinhood/token/0xf8bc08092c06db6148114dcf82af881f1085f92b",
+      "twitter": "https://x.com/sherwoodagent",
+      "website": "https://sherwood.sh",
+      "telegram": "",
+      "github": ""
+    },
+    "smartDegenCount": 20,
+    "kolCaveat": "GMGN 标签与当前钱包快照；买入资本优先用 history_bought_cost、缺失才用 buy_volume_cur；留存按卖出比例估算，不用可能混入转账的当前余额反推。“活跃”另设 $25 余额下限：残值 < $25、或卖出 ≥ 99.9% 且残值 < $1 的尘埃/已清仓行，不计入 active_count / active_market_buy_count / top_active。未证明 X 发帖因果或资金簇独立性。"
+  },
+  "narrative": {
+    "origin": "WOOD 部署在 robinhood 链上，对外身份是 sherwoodagent（X 账号 + sherwood.sh 官网），明显蹭 Robinhood/Sherwood 品牌与 AI agent 概念。素材未覆盖该项目与 Robinhood 官方的任何关系证据，按规则不得把外部公司产品叙事偷渡给本 token。",
+    "memeHook": "钩子=Robinhood 生态首链梗 + 'Sherwood' 侠盗/AI 代理双关，链原生 meme 属性成立，42,300 持有者说明注意力曾扩散。但 github、telegram 均为空，社区基础设施单薄，钩子厚度素材未覆盖。",
+    "tech": {
+      "status": "announced",
+      "detail": "有官网与 agent 命名账号，属'只有声称'档；素材未覆盖任何可观测的线上运行产品，github 为空，无法验证 running。严禁因 Robinhood 自身产品有技术而给本币计 running。"
+    },
+    "tokenCapture": "素材未覆盖任何费用/回购/烧毁/staking 或产品必要权利条款，买卖税均为 0，无可见价值传导路径，按方法论默认纯注意力盘，产品即使存在也不等于币有收入权。",
+    "whyWait": "",
+    "whyNotNow": "",
+    "nextLeg": "",
+    "runnable": {
+      "applies": false,
+      "verdict": "na",
+      "evidence": []
+    }
+  },
+  "verdict": {
+    "score": 40.0,
+    "scoreBreakdown": {
+      "narrative": 13.0,
+      "kol": 4.0,
+      "tape": 7.0,
+      "chips": 9.0,
+      "catalyst": 3.0,
+      "execution": 4.0
+    },
+    "hardCap": null,
+    "label": "observe",
+    "buyZone": {
+      "pullbackMcBand": "",
+      "pullbackPriceBand": "",
+      "breakoutMc": "",
+      "invalidationMc": "",
+      "targets": "",
+      "trigger": "",
+      "sizingNote": ""
+    },
+    "oneLiner": "链原生 Robinhood/Sherwood 梗有注意力底子、合约干净且流动性锁定，但 KOL 真钱买入为零、技术与价值捕获均无素材支撑，只配观察不配追。"
+  },
+  "history": [
+    {
+      "at": "2026-08-31T23:14:07.609933+08:00",
+      "mc": 9310854.8,
+      "score": 40.0,
+      "label": "observe"
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Fomo叙事镜</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; width: 300px; padding: 12px 13px 11px;
+    background: #111214; color: #e6e7ea;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 13px; line-height: 1.5;
+  }
+  h1 { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: #fff; }
+  .sub { margin: 0 0 12px; font-size: 11px; color: #7f8590; }
+  .group { margin-bottom: 12px; }
+  .gtitle {
+    font-size: 11px; color: #6fd8ab; letter-spacing: .5px; font-weight: 600;
+    padding-bottom: 5px; border-bottom: 1px solid #1e2024; margin-bottom: 4px;
+  }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 7px 0;
+  }
+  .row + .row { border-top: 1px solid #1a1c20; }
+  label { cursor: pointer; }
+  .hint { font-size: 11px; color: #7f8590; margin-top: 1px; }
+  input[type=checkbox] { accent-color: #5b9cff; width: 15px; height: 15px; cursor: pointer; }
+  select, input[type=text], textarea {
+    background: #1a1c20; color: #e6e7ea; border: 1px solid #2c2f35;
+    border-radius: 6px; padding: 4px 6px; font-size: 12px;
+    font-family: inherit; width: 100%; box-sizing: border-box;
+  }
+  textarea { resize: vertical; min-height: 46px; font-family: ui-monospace, Menlo, monospace; }
+  input[type=text] { font-family: ui-monospace, Menlo, monospace; }
+  .row select { width: auto; min-width: 92px; flex: 0 0 auto; }
+  .row > span { flex: 1 1 auto; min-width: 0; }
+  .field { padding: 7px 0; }
+  .field + .field { border-top: 1px solid #1a1c20; }
+  .field label { display: block; margin-bottom: 4px; }
+  .msg { font-size: 11px; margin-top: 4px; min-height: 14px; }
+  .msg.err { color: #ff7b72; }
+  .msg.ok { color: #6fd8ab; }
+  .adv { padding: 8px 0 2px; border-top: 1px solid #1a1c20; margin-top: 2px; }
+  .adv .row { padding: 4px 0; align-items: flex-start; }
+  .warn-lbl { color: #ff9d92; font-size: 11px; line-height: 1.45; cursor: pointer; }
+  .warn-hint { color: #7f8590; font-size: 11px; margin-top: 2px; }
+  #allowPrivate { accent-color: #ff7b72; margin-top: 1px; }
+  .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2024;
+          font-size: 11px; color: #62666e; }
+</style>
+</head>
+<body>
+  <h1>Fomo叙事镜</h1>
+  <p class="sub">在 fomo.family 上聚合叙事、社区观点与持仓结构</p>
+
+  <div class="group">
+    <div class="gtitle">通用</div>
+    <div class="field">
+      <label for="openMode">自动弹出模式</label>
+      <select id="openMode">
+        <option value="compact">精简展开（只显示起源+评级理由）</option>
+        <option value="full">全部展开</option>
+        <option value="off">不自动弹出（点右下角按钮才显示）</option>
+      </select>
+      <div class="hint">精简为默认；不自动弹出时点右下角「叙」钮才显示</div>
+    </div>
+    <div class="row">
+      <span>
+        <label for="hoverPreview">悬停预览</label>
+        <div class="hint">划过左栏行即预览</div>
+      </span>
+      <input type="checkbox" id="hoverPreview">
+    </div>
+    <div class="row">
+      <span>
+        <label for="lang">默认语言</label>
+        <div class="hint">卡片内可随时切换</div>
+      </span>
+      <select id="lang">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="gtitle">数据源</div>
+
+    <div class="field">
+      <label for="analysisTemplate">分析源 URL 模板（可选）</label>
+      <input type="text" id="analysisTemplate" placeholder="https://my-host/data/{ca}.json">
+      <div class="hint">用 {ca} 占位；必须是 https 公网地址；留空则「AI 判断」段不显示</div>
+    </div>
+
+    <div class="field">
+      <label for="detailTemplate">详情页 URL 模板（可选）</label>
+      <input type="text" id="detailTemplate" placeholder="https://my-host/report/{ca}.html">
+      <div class="hint">填了才会出现「查看完整分析」链接</div>
+    </div>
+
+    <div class="adv">
+      <div class="row">
+        <span>
+          <label for="allowPrivate" class="warn-lbl">⚠️ 高级·仅自用：允许 http 或内网/自建分析源</label>
+          <div class="warn-hint">公网用户请勿开启，有 SSRF 风险。仅当你把 dossier 放在自己的内网/局域网/自建服务上时才需要。默认关闭 = 只收 https 公网地址。</div>
+        </span>
+        <input type="checkbox" id="allowPrivate">
+      </div>
+    </div>
+
+    <div class="msg" id="msg"></div>
+    <button type="button" id="save" style="width:100%;background:#1a1c20;color:#e6e7ea;
+      border:1px solid #2c2f35;border-radius:6px;padding:6px;cursor:pointer;font-size:12px;">
+      保存数据源设置
+    </button>
+  </div>
+
+  <div class="foot">通用设置即时生效；数据源需点保存并授权。</div>
+  <script src="popup.js"></script>
+</body>
+</html>

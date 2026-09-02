@@ -1,0 +1,42 @@
+{
+ "_test_note": "真实 api.fxtwitter.com 响应（2026-09-01 实抓，字段裁剪为本扩展消费的子集）。中间那条 id 线上已 404（推文被删），刻意保留以覆盖'单条失败静默跳过'路径。",
+ "byId": {
+  "2093207087069176051": {
+   "code": 200,
+   "message": "OK",
+   "tweet": {
+    "url": "https://x.com/BerrysMari/status/2093207087069176051",
+    "id": "2093207087069176051",
+    "text": "⚡️ Another listing on the watch: $PONS.\n\n$hood\n\n@RobinhoodApp chain\n\nCA: 0x39dbed3a2bd333467115de45665cc57f813c4571\n\n🗳 Vote now and support the listing\nQFdt69jo\nhttps://marketsupportingvote.vercel.app/?contract=0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "created_at": "Fri Aug 28 05:20:34 +0000 2026",
+    "likes": 0,
+    "views": 1,
+    "author": {
+     "screen_name": "BerrysMari",
+     "name": "Mari Berrys"
+    }
+   }
+  },
+  "2093134846319079850": {
+   "_status": 404,
+   "code": 404,
+   "message": "NOT_FOUND"
+  },
+  "2092126729209082109": {
+   "code": 200,
+   "message": "OK",
+   "tweet": {
+    "url": "https://x.com/Squiddyderpypy/status/2092126729209082109",
+    "id": "2092126729209082109",
+    "text": "$PONS IS AT 100M \n\n0x39dbed3a2bd333467115de45665cc57f813c4571\n\nTHE OLDEST TOKEN IN THE LAUNCHPAD IS SITTING AT 17K\n\n$P (🅿️)\n\nThe first letter of Pons. Solid narrative to put it too IMO. \n\n0x4b1c1725fa83d1a3effe48c992c969788cfac32a",
+    "created_at": "Tue Aug 25 05:47:36 +0000 2026",
+    "likes": 26,
+    "views": 2358,
+    "author": {
+     "screen_name": "Squiddyderpypy",
+     "name": "Squiddy🦑"
+    }
+   }
+  }
+ }
+}

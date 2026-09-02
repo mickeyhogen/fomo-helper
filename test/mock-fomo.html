@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Mock fomo.family</title>
+<style>
+  body { margin: 0; background: #0b0c0e; color: #e6e7ea;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
+  #panel { position: fixed; left: 0; top: 0; bottom: 46px; width: 280px;
+           background: #101114; border-right: 1px solid #1e2024; padding: 10px 8px;
+           overflow-y: auto; }
+  .panel-title { font-size: 11px; color: #7f8590; padding: 4px 6px 8px; letter-spacing: .5px; }
+  .tabbar { display: flex; gap: 4px; padding: 2px 4px 8px; border-bottom: 1px solid #1e2024; }
+  .tabbar button {
+    background: #16181c; border: 1px solid #1e2024; color: #9aa0aa;
+    border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
+  }
+  .tabbar button.on { background: #1f2937; color: #fff; border-color: #2c3f57; }
+  .row { display: block; padding: 10px; margin-bottom: 6px; border-radius: 8px;
+         background: #16181c; border: 1px solid #1e2024; text-decoration: none; color: #e6e7ea; }
+  .row:hover { background: #1c1f24; border-color: #2c2f35; }
+  .feed-entry { padding: 8px; margin-bottom: 6px; border-radius: 8px; background: #131417;
+                border: 1px solid #1e2024; }
+  .feed-head { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 4px; }
+  .feed-head a { color: #cfd2d8; text-decoration: none; font-weight: 600; }
+  .badge-thesis { font-size: 10px; color: #8fbaff; border: 1px solid #2c3f57;
+                  border-radius: 4px; padding: 0 5px; background: rgba(91,156,255,.08); }
+  .feed-head .sym { color: #6fd8ab; } .feed-head .t { color: #62666e; margin-left: auto; }
+  .feed-body { font-size: 12px; color: #b8bcc4; line-height: 1.5; }
+  .feed-foot { font-size: 11px; color: #7f8590; margin-top: 3px; }
+  .holders-title { font-size: 13px; color: #cfd2d8; font-weight: 600; margin-bottom: 8px; }
+  .htab { display: flex; gap: 16px; font-size: 11px; color: #7f8590; padding-bottom: 6px;
+          border-bottom: 1px solid #1e2024; }
+  .hrow { display: flex; gap: 12px; align-items: center; padding: 8px 0;
+          border-bottom: 1px solid #16181c; font-size: 12px; color: #b8bcc4; flex-wrap: wrap; }
+  .htrader { color: #cfd2d8; text-decoration: none; font-weight: 600; }
+  .hpos { color: #6fd8ab; } .hpnl { color: #9aa0aa; }
+  .hcell { display: flex; gap: 8px; align-items: center; }
+  .avatar { width: 16px; height: 16px; border-radius: 50%; background: #2c3f57;
+            display: inline-block; flex: 0 0 auto; }
+  .uname { color: #cfd2d8; text-decoration: none; font-weight: 600; cursor: pointer; }
+  .filterbar { display: flex; gap: 5px; align-items: center; font-size: 11px;
+               color: #9aa0aa; padding: 4px 6px; }
+  .sym { font-weight: 600; display: block; }
+  .meta { font-size: 11px; color: #7f8590; display: block; margin-top: 2px; }
+  main { margin-left: 300px; padding: 0; }
+  /* 代币信息条：卡片默认位置绝不能盖住它 */
+  #token-header {
+    height: 120px; border-bottom: 1px solid #1e2024; padding: 18px 24px;
+    background: #0e0f11;
+  }
+  #token-header .tk { font-size: 20px; font-weight: 700; }
+  #token-header .ca { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+                      color: #7f8590; margin-top: 6px; }
+  #chart { height: 380px; margin: 0 24px; border-bottom: 1px solid #1e2024;
+           display: flex; align-items: center; justify-content: center; color: #3a3d44;
+           font-size: 32px; letter-spacing: 6px; }
+  /* Holders 表：卡片默认高度必须给它留出空间 */
+  #holders { padding: 16px 24px 60px; }
+  #holders h3 { margin: 0 0 8px; font-size: 13px; color: #9aa0aa; }
+  #holders .hrow { display: flex; justify-content: space-between; padding: 6px 0;
+                   border-bottom: 1px solid #16181c; font-size: 12px; color: #8b8f98; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; height: 46px;
+           background: #0e0f11; border-top: 1px solid #1e2024;
+           display: flex; align-items: center; gap: 14px; padding: 0 12px; }
+  footer a { color: #9aa0aa; text-decoration: none; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <!-- 标签栏：扩展靠这里的 "Alerts" 按钮定位左侧面板 -->
+  <div class="tabbar">
+    <button class="on">Alerts</button>
+    <button>Tokens</button>
+    <button>Leaderboard</button>
+    <button>Feed</button>
+    <!-- 诱饵①：标签页名恰好是 "Thesis"，不是 Feed 条目 -->
+    <button id="tab-thesis">Thesis</button>
+  </div>
+  <div class="panel-title">ALERTS / FEED</div>
+
+  <!-- 行 1：带锚点（PONS） -->
+  <div class="row" id="row-anchor-pons">
+    <a href="/tokens/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571"
+       style="text-decoration:none;color:inherit">
+      <span class="sym">PONS</span>
+      <span class="meta">锚点行 · 新高</span>
+    </a>
+  </div>
+
+  <!-- 行 2：带锚点（CASHCAT） -->
+  <div class="row" id="row-anchor-cashcat">
+    <a href="/tokens/robinhood/0x020bfc650a365f8bb26819deaabf3e21291018b4"
+       style="text-decoration:none;color:inherit">
+      <span class="sym">CASHCAT</span>
+      <span class="meta">锚点行 · 热度上升</span>
+    </a>
+  </div>
+
+  <div class="panel-title">FEED</div>
+  <!-- 诱饵②："Thesis only" 过滤器，徽章文本同样恰为 Thesis -->
+  <label class="filterbar" id="filter-thesis-only">
+    <input type="checkbox" id="thesis-only-cb">
+    <span>Thesis</span><span>only</span>
+  </label>
+  <div class="feed">
+    <div class="feed-entry">
+      <div class="feed-head">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/woodchopper">woodchopper</a>
+        <span class="badge-thesis">Thesis</span>
+        <span class="sym">$PONS</span>
+        <span class="t">2h</span>
+      </div>
+      <div class="feed-body">This is the first non-custodial launchpad actually shipping on Robinhood Chain. Team pushed V2 last week and the fee-burn is live. Full thread https://x.com/ponsdotfamily/status/2093207087069176051</div>
+      <div class="feed-foot"><span class="likes">♥ 42</span></div>
+    </div>
+    <!-- 线上真实形态：作者是「头像 img + 可点的名字 span」，整条没有任何 /profile/ 链接。
+         v0.6 的"必须有 profile 链接"规则会把这种条目全部误杀 → 主人永远只看到"暂无"。
+         img 的 alt 故意不是名字，逼着抓取器走"名字 span"这条路。 -->
+    <div class="feed-entry" id="entry-noprofile">
+      <div class="feed-head">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <span class="uname">degenrick</span>
+        <span class="badge-thesis">Thesis</span>
+        <span class="sym">$PONS</span>
+        <span class="t">3h</span>
+      </div>
+      <div class="feed-body">发币权真的开放出去了，V2 的手续费回购在链上跑了三周，这条我拿到 10M 都不卖。</div>
+      <div class="feed-foot"><span class="likes">♥ 63</span></div>
+    </div>
+    <div class="feed-entry">
+      <div class="feed-head">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/sherwoodmaxi">sherwoodmaxi</a>
+        <span class="badge-thesis">Thesis</span>
+        <span class="sym">$PONS</span>
+        <span class="t">5h</span>
+      </div>
+      <div class="feed-body">链上真金白银的回购已经跑了三周，不是 PPT。市值回到 4M 以下我会继续加。</div>
+      <div class="feed-foot"><span class="likes">♥ 17</span></div>
+    </div>
+    <div class="feed-entry">
+      <div class="feed-head">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/othercoinguy">othercoinguy</a>
+        <span class="badge-thesis">Thesis</span>
+        <span class="sym">$CASHCAT</span>
+        <span class="t">1h</span>
+      </div>
+      <div class="feed-body">CASHCAT 的梗比 PONS 更硬，Vlad 亲自认证过的名字。</div>
+      <div class="feed-foot"><span class="likes">♥ 9</span></div>
+    </div>
+  </div>
+
+  <div class="panel-title" style="padding-top:12px">WATCHLIST（无锚点区）</div>
+  <!-- 独立分组：组内没有任何 /tokens/ 锚点，确保这两行只能靠 fiber 解析 -->
+  <div id="watch-group">
+    <!-- 行 3：无锚点纯 div，靠 React fiber 解析；props 里同时埋了用户钱包陷阱 -->
+    <div class="row" id="row-fiber">
+      <span class="sym">CASHCAT (fiber)</span>
+      <span class="meta">无锚点 · fiber 解析</span>
+    </div>
+
+    <!-- 行 4：陷阱行 —— fiber 里只有用户钱包地址，不应解析出任何币 -->
+    <div class="row" id="row-wallet-trap">
+      <span class="sym">陷阱行</span>
+      <span class="meta">仅含用户钱包地址</span>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div id="token-header">
+    <div class="tk">PONS</div>
+    <div class="ca">0x39dbed3a2bd333467115de45665cc57f813c4571 · 复制</div>
+  </div>
+  <div id="chart">CHART</div>
+  <div id="holders">
+    <div class="holders-title">Holders (128)</div>
+    <!-- 诱饵③：线上 Holders 表列头最后一列就叫 Thesis -->
+    <div class="htab">
+      <div class="hcol">Trader</div><div class="hcol">Position</div>
+      <div class="hcol">PnL</div><div class="hcol">Avg. entry</div>
+      <div class="hcol">Thesis</div>
+    </div>
+    <!-- 列顺序照抄线上：Trader | Position($ + 代币数量) | PnL($ 与 %) | Avg. entry -->
+    <div class="hrow">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/31337___" class="htrader">31337___</a>
+        <span class="hhold">2d 4h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$29.4K</span><span class="hamt">76.4K PONS</span></div>
+      <div class="hcell"><span class="hpnl">+$2,436</span><span class="hpct">▲ 1,163.84%</span></div>
+      <div class="hcell"><span class="hentry">$0.000385</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis">203 You can now see which tokens distribute creator rewards to holders. See here: https://x.com/ponsdotfamily/status/2093207087069176051</div>
+    </div>
+    <div class="hrow">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/MEADGod" class="htrader">MEADGod</a>
+        <span class="hhold">6d 1h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$18.4K</span><span class="hamt">2.1M PONS</span></div>
+      <div class="hcell"><span class="hpnl">+$5,210</span><span class="hpct">▲ 42.11%</span></div>
+      <div class="hcell"><span class="hentry">$0.00412</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis">147 发币权真的开放出去了，V2 手续费回购在链上跑了三周，这条我拿到 10M 都不卖。</div>
+    </div>
+    <div class="hrow">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/paperhands" class="htrader">paperhands</a>
+        <span class="hhold">1d 2h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$9.1K</span><span class="hamt">610K PONS</span></div>
+      <div class="hcell"><span class="hpnl">-$1,204</span><span class="hpct">▼ 11.67%</span></div>
+      <div class="hcell"><span class="hentry">$0.0071</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis"></div>
+    </div>
+    <div class="hrow">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/degenqueen" class="htrader">degenqueen</a>
+        <span class="hhold">3d 9h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$5.3K</span><span class="hamt">305K PONS</span></div>
+      <div class="hcell"><span class="hpnl">+$880</span><span class="hpct">▲ 19.90%</span></div>
+      <div class="hcell"><span class="hentry">$0.0052</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis">88 发币权真的开放出去了，V2 手续费回购在链上跑了三周，这条我拿到 10M 都不卖。</div>
+    </div>
+    <div class="hrow">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <a href="/profile/silentbag" class="htrader">silentbag</a>
+        <span class="hhold">12h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$2.2K</span><span class="hamt">140K PONS</span></div>
+      <div class="hcell"><span class="hpnl">-$310</span><span class="hpct">▼ 12.36%</span></div>
+      <div class="hcell"><span class="hentry">$0.0110</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis"></div>
+    </div>
+    <!-- 线上真实形态：交易者列没有链接，文本是 "名字 Team 3d 1h avg. hold"，
+         名字必须从这段文本里抠出来（Team / avg. hold 尾巴都要砍掉） -->
+    <div class="hrow" id="hrow-noprofile">
+      <div class="hcell">
+        <img class="avatar" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==" alt="avatar">
+        <span class="htrader">ogle Team 3d 1h avg. hold</span>
+      </div>
+      <div class="hcell"><span class="hpos">$1.4K</span><span class="hamt">88K PONS</span></div>
+      <div class="hcell"><span class="hpnl">+$402</span><span class="hpct">▲ 40.20%</span></div>
+      <div class="hcell"><span class="hentry">$0.0038</span></div>
+      <div class="hcell hmcap"><span>$110.5M MC $0.111</span></div>
+      <div class="hcell hthesis">30 dev renounced and locked LP, this is the real deal.</div>
+    </div>
+    <!-- 汇总行：有 avg. hold 却没有作者锚 → 不许被当成持仓行（否则 $64.4K 会排到第一） -->
+    <div class="hrow" id="holders-summary">
+      <div class="hcell"><span>Top 100 total · 3d 1h avg. hold</span></div>
+      <div class="hcell"><span>$64.4K</span></div>
+      <div class="hcell"><span>+$9,900</span><span>▲ 88.00%</span></div>
+      <div class="hcell"><span>$0.0044</span></div>
+    </div>
+  </div>
+</main>
+
+<!-- 固定页脚：主流币快捷行情链接，含 /tokens/ 锚点，必须被悬停解析忽略 -->
+<footer>
+  <a href="/tokens/solana/So11111111111111111111111111111111111111112" id="footer-sol">SOL $198.20</a>
+  <a href="/tokens/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571" id="footer-btc">BTC $109,400</a>
+</footer>
+
+<script>
+  // 模拟 React fiber：内部属性键以 __reactFiber 开头，且可枚举。
+  var WALLET = 'Demo111111111111111111111111111111111111111';   // base58 用户钱包
+  var CASHCAT_CA = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
+
+  // fiber 行：用户钱包 + 代币 CA 同时存在 —— 正确行为是解析出代币 CA。
+  // 刻意用 CASHCAT：若锚点逻辑越界抓了面板里的第一个链接，拿到的会是 PONS，测试即可分辨。
+  var fiberRow = document.getElementById('row-fiber');
+  fiberRow['__reactFiber$mock1'] = {
+    memoizedProps: {
+      className: 'row',
+      value: {
+        fomoUser: { address: WALLET, handle: 'demo_user' },
+        token: { ca: CASHCAT_CA, symbol: 'CASHCAT' }
+      }
+    },
+    return: null
+  };
+
+  // 行 4：只有用户钱包 —— 正确行为是什么都不解析
+  var trapRow = document.getElementById('row-wallet-trap');
+  trapRow['__reactFiber$mock2'] = {
+    memoizedProps: {
+      className: 'row',
+      value: {
+        fomoUser: { address: WALLET },
+        profile: { walletAddress: WALLET }
+      }
+    },
+    return: null
+  };
+</script>
+</body>
+</html>

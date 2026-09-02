@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Fomo叙事镜",
+  "version": "0.8.0",
+  "description": "在 fomo.family 浏览代币时，把 DeBot 叙事、社区 thesis、持有人结构与来源推文聚成一张浮动卡片；可选接入你自己的分析源。",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://app.debot.ai/*",
+    "https://debot.ai/*",
+    "https://api.fxtwitter.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://fomo.family/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Fomo叙事镜",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyUO2KfG5iOQTCPZmH125nXabLB/IeesYrGV3km2f+fbizjkldMsMtmkZnw38MzsJYkIAw3UuL5f+vfV2+blYi6VSe4C+dxxDGmPjXY4UfRpiGXKFP0LP7BkV9LNHQj1OZeUNobr2g2Yf2fVPsLyshBD05Z7uZSoNT4UVlfkbW5YFyRoWSt+brm8tecxlWiCjbZwrFR3/XPkAzaRq94fWxBozUcH876vPJD9B1mehVjVvNo6El4r4zPuoSuthu5T8a5LqXSl+ZaEgZgOnXPmHDGItz0dCH+rlZvpcEBesJmFpmG9XHXht79ccr3rHiXW4S4hNuXcaWeGJuRssYFBFSwIDAQAB"
+}
