@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fomo叙事镜 — 在 fomo.family 一张卡看齐叙事、观点与持仓</title>
+<title>Fomo放大镜 — 在 fomo.family 一张卡看齐叙事、观点与持仓</title>
 <meta name="description" content="开源 Chrome/Edge 扩展：在 fomo.family 浏览代币时，把 DeBot 叙事、社区观点、持仓者结构与来源推文聚成一张浮动卡片。零后端，不采集任何数据。">
 <style>
   :root{
@@ -104,8 +104,12 @@
 <header>
   <div class="wrap">
     <div class="hero-top">
-      <img src="assets/icon-128.png" alt="Fomo叙事镜图标">
-      <h1>Fomo叙事镜</h1>
+      <img src="assets/icon-128.png" alt="Fomo放大镜图标">
+      <div>
+        <h1>Fomo放大镜</h1>
+        <div style="font-size:13.5px;color:var(--dim);margin-top:4px">Chrome / Edge 扩展 ·
+          <a href="https://x.com/0xhogen" style="color:var(--muted)">@0xhogen</a> 出品 · 开源</div>
+      </div>
     </div>
     <p class="tagline">在 <b>fomo.family</b> 浏览代币时，把 DeBot 叙事、社区观点、持仓者结构与来源推文
       聚成<b>一张浮动卡片</b>——不用为了看一眼叙事另开三个标签页。</p>
@@ -116,8 +120,8 @@
       <span class="badge">Chrome / Edge / Brave</span>
     </div>
     <div class="cta">
-      <a class="btn btn-main" id="dl" href="https://github.com/mickey-hogen/fomo-narrative-lens/releases/latest">下载最新版 zip</a>
-      <a class="btn btn-ghost" href="https://github.com/mickey-hogen/fomo-narrative-lens">GitHub 源码</a>
+      <a class="btn btn-main" id="dl" href="https://github.com/mickey-hogen/fomo-magnifier/releases/latest">下载最新版 zip</a>
+      <a class="btn btn-ghost" href="https://github.com/mickey-hogen/fomo-magnifier">GitHub 源码</a>
       <span id="ver">最新版本见 GitHub Releases</span>
     </div>
     <div class="hero-shot">
@@ -232,8 +236,8 @@
       <li>
         <h3>下载并解压</h3>
         <p>点上方「下载最新版 zip」。
-          <span class="os-mac">双击 zip 自动解压出 <code>fomo-narrative-lens</code> 文件夹。</span>
-          <span class="os-win" hidden>在 zip 上<b>右键 →「全部解压缩…」</b>解压出 <code>fomo-narrative-lens</code> 文件夹。
+          <span class="os-mac">双击 zip 自动解压出 <code>fomo-magnifier</code> 文件夹。</span>
+          <span class="os-win" hidden>在 zip 上<b>右键 →「全部解压缩…」</b>解压出 <code>fomo-magnifier</code> 文件夹。
             <b>不要</b>双击进入 zip 直接用——那是个预览视图，Chrome 读不到它。</span>
         </p>
       </li>
@@ -263,7 +267,7 @@
       <b style="color:var(--text)">更新方式：</b>下载新版 zip，解压覆盖原来的文件夹，回 <code>chrome://extensions</code>
       点该扩展卡片上的刷新圈 ↻（或重启浏览器）。<b style="color:var(--text)">配置不会丢</b>——扩展 ID 是固定的，
       即使你把文件夹挪去别的位置重装，名单和设置也都在原地。想收到新版本提醒，在 GitHub 上
-      <a href="https://github.com/mickey-hogen/fomo-narrative-lens">Watch → Custom → Releases</a> 即可。
+      <a href="https://github.com/mickey-hogen/fomo-magnifier">Watch → Custom → Releases</a> 即可。
     </div>
   </div>
 </section>
@@ -291,7 +295,7 @@
       <summary>它会碰我的 fomo 登录态或钱包吗</summary>
       <div class="a"><b>不会。</b>扩展不向 fomo 发任何网络请求（观点/持仓是读页面已渲染的内容），
         不读取、不存储、不外发任何令牌，更没有触碰钱包的权限。详见上方「它碰得到什么」与
-        <a href="https://github.com/mickey-hogen/fomo-narrative-lens/blob/main/PRIVACY.md">PRIVACY.md</a>。</div>
+        <a href="https://github.com/mickey-hogen/fomo-magnifier/blob/main/PRIVACY.md">PRIVACY.md</a>。</div>
     </details>
     <details>
       <summary>为什么不显示星级评分</summary>
@@ -307,7 +311,7 @@
       <summary>fomo 改版之后有些内容抓不到了</summary>
       <div class="a">观点 / 持仓者靠页面文本特征解析（fomo 的 CSS 类名是哈希化的，没法依赖），
         大改版可能让它们退化成灰字提示；叙事页不受影响。遇到了请开
-        <a href="https://github.com/mickey-hogen/fomo-narrative-lens/issues">GitHub Issue</a>，
+        <a href="https://github.com/mickey-hogen/fomo-magnifier/issues">GitHub Issue</a>，
         修起来通常很快。</div>
     </details>
   </div>
@@ -316,19 +320,20 @@
 <footer>
   <div class="wrap">
     <div class="links">
-      <a href="https://github.com/mickey-hogen/fomo-narrative-lens">GitHub</a>
-      <a href="https://github.com/mickey-hogen/fomo-narrative-lens/blob/main/CHANGELOG.md">更新日志</a>
-      <a href="https://github.com/mickey-hogen/fomo-narrative-lens/blob/main/PRIVACY.md">隐私说明</a>
-      <a href="https://github.com/mickey-hogen/fomo-narrative-lens/issues">反馈问题</a>
+      <a href="https://x.com/0xhogen">𝕏 @0xhogen</a>
+      <a href="https://github.com/mickey-hogen/fomo-magnifier">GitHub</a>
+      <a href="https://github.com/mickey-hogen/fomo-magnifier/blob/main/CHANGELOG.md">更新日志</a>
+      <a href="https://github.com/mickey-hogen/fomo-magnifier/blob/main/PRIVACY.md">隐私说明</a>
+      <a href="https://github.com/mickey-hogen/fomo-magnifier/issues">反馈问题</a>
     </div>
-    <p class="disclaimer">Fomo叙事镜是独立的第三方开源工具，与 fomo.family、DeBot 及相关方无任何隶属、授权或合作关系，
-      所有商标归各自所有者。卡片聚合展示的均为公开数据；任何内容都不构成投资建议。MIT License。</p>
+    <p class="disclaimer">Fomo放大镜是独立的第三方开源工具，与 fomo.family、DeBot 及相关方无任何隶属、授权或合作关系，
+      所有商标归各自所有者。卡片聚合展示的均为公开数据；任何内容都不构成投资建议。MIT License · 作者 <a href="https://x.com/0xhogen">@0xhogen</a>。</p>
   </div>
 </footer>
 
 <script>
 (function(){
-  var OWNER='mickey-hogen', REPO='fomo-narrative-lens';
+  var OWNER='mickey-hogen', REPO='fomo-magnifier';
   // OS tab：按访问者平台预选
   window.pickOS=function(os){
     document.getElementById('tab-mac').classList.toggle('on',os==='mac');

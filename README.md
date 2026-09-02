@@ -1,6 +1,6 @@
-# Fomo叙事镜
+# Fomo放大镜
 
-**[图文说明与安装页](https://mickey-hogen.github.io/fomo-narrative-lens/)** · [下载最新版](https://github.com/mickey-hogen/fomo-narrative-lens/releases/latest) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT
+**[图文说明与安装页](https://mickey-hogen.github.io/fomo-magnifier/)** · [下载最新版](https://github.com/mickey-hogen/fomo-magnifier/releases/latest) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · 作者 [@0xhogen](https://x.com/0xhogen)
 
 一个 Chrome 扩展。在 [fomo.family](https://fomo.family) 上浏览代币时，把散落在四处的信息
 聚成一张浮动卡片，回答两个问题：**这币的叙事是什么，社区在拿什么理由持仓。**
@@ -106,9 +106,9 @@ DeBot 的 1–5 星评分是主观打分，卡片**不显示星级**，避免被
 ## 安装
 
 支持 Chrome / Edge / Brave（Chromium 系）。没有构建步骤，以「已解压扩展」方式加载，
-图文版见[安装页](https://mickey-hogen.github.io/fomo-narrative-lens/#install)：
+图文版见[安装页](https://mickey-hogen.github.io/fomo-magnifier/#install)：
 
-1. 从 [Releases](https://github.com/mickey-hogen/fomo-narrative-lens/releases/latest) 下载 zip 并解压
+1. 从 [Releases](https://github.com/mickey-hogen/fomo-magnifier/releases/latest) 下载 zip 并解压
    （**Windows**：右键 →「全部解压缩…」，不要在 zip 预览视图里直接选目录；**macOS**：双击自动解压）
 2. 把解压出的文件夹放到一个**固定位置**（如 `C:\Extensions\` 或 `~/Documents/Extensions/`）——
    浏览器每次启动都从这里读取，放在「下载」里容易被清理误删
@@ -281,6 +281,6 @@ node test/run-render-test.mjs
 
 ---
 
-## 许可
+## 作者与许可
 
-MIT，全文见 [LICENSE](LICENSE)。
+作者 [@0xhogen](https://x.com/0xhogen)。MIT，全文见 [LICENSE](LICENSE)。

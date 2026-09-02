@@ -1,5 +1,5 @@
 /**
- * Fomo叙事镜 — 渲染回归测试（v0.8：卡片标签页化 叙事/观点/持仓者）
+ * Fomo放大镜 — 渲染回归测试（v0.8：卡片标签页化 叙事/观点/持仓者）
  *
  * 起一个本地 https 服务（自签证书 + --host-resolver-rules 把 analysis.test 指到本机）：
  * 静态托管 test/，外加 /analysis/<ca>.json 动态路由，真实跑通「分析源 URL 模板」这条路径

@@ -1,5 +1,5 @@
 /**
- * Fomo叙事镜 — content script
+ * Fomo放大镜 — content script
  *
  * 在 fomo.family 上监听"当前聚焦的代币"（URL 变化 / 左栏悬停），
  * 通过 background 拉 DeBot 叙事，渲染到一个 closed ShadowRoot 卡片里。
@@ -633,7 +633,7 @@ details.tweets > summary { color: #9aa0aa; }
     // --- 圆钮 ---
     launcher = h('button', {
       cls: 'launcher', text: '叙', attrs: { type: 'button' },
-      title: 'Fomo叙事镜：查看当前代币叙事',
+      title: 'Fomo放大镜：查看当前代币叙事',
       on: { click: onLauncherClick },
     });
 
