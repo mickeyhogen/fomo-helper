@@ -39,6 +39,9 @@
   .field { padding: 7px 0; }
   .field + .field { border-top: 1px solid #1a1c20; }
   .field label { display: block; margin-bottom: 4px; }
+  .byline { margin-top: 4px; color: #4a4d54; letter-spacing: .3px; }
+  .bylink { color: #6a6e76; text-decoration: none; }
+  .bylink:hover { color: #9aa0aa; text-decoration: underline; }
   .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2024;
           font-size: 11px; color: #62666e; }
 </style>
@@ -56,7 +59,7 @@
         <option value="full">全部展开</option>
         <option value="off">不自动弹出（点右下角按钮才显示）</option>
       </select>
-      <div class="hint">精简为默认；不自动弹出时点右下角「叙」钮才显示</div>
+      <div class="hint">精简为默认；不自动弹出时点右下角「🔍」钮才显示</div>
     </div>
     <div class="row">
       <span>
@@ -77,7 +80,9 @@
     </div>
   </div>
 
-  <div class="foot">设置改完即时生效。</div>
+  <div class="foot">设置改完即时生效。
+    <div class="byline"><span id="bver">Fomo放大镜</span> · by <a class="bylink" href="https://x.com/0xHogen" target="_blank" rel="noopener noreferrer">@0xHogen</a></div>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

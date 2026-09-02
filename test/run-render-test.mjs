@@ -1,5 +1,8 @@
 /**
- * Fomo放大镜 — 渲染回归测试（v0.8：卡片标签页化 叙事/观点/持仓者）
+ * Fomo放大镜（公开版）— 渲染回归测试
+ *
+ * 公开版不含「自定义分析源」：对应步骤 13~17b-2 与 25b 已随该能力移除，
+ * 步骤 25/27 断言的是“设置面板只剩通用组 / 最小权限面”。
  *
  * 起一个本地 https 服务（自签证书 + --host-resolver-rules 把 analysis.test 指到本机）：
  * 静态托管 test/，外加 /analysis/<ca>.json 动态路由，真实跑通「分析源 URL 模板」这条路径
@@ -38,7 +41,7 @@ const NOPERM_CA = '0x4444444444444444444444444444444444444444';   // 未授权
 const PLACEHOLDER_CA = '0x5555555555555555555555555555555555555555'; // 占位词合成样本
 const ERROR_CA = '0x6666666666666666666666666666666666666666';       // 后台回一个"脏"错误串
 const BOOM_CA = '0x7777777777777777777777777777777777777777';        // 分析源 500 + 脏正文
-const WALLET = 'Demo111111111111111111111111111111111111111';
+const WALLET = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
 
 const readJson = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', f), 'utf8'));
 const FIX = {
@@ -48,8 +51,7 @@ const FIX = {
   tweets: readJson('fxtweet.json'),
   placeholders: readJson('placeholders.json'),
 };
-const DOSSIER_FAST = readJson('dossier-fast.json'); // 无 creatorOpenCount
-const DOSSIER_DEEP = readJson('dossier-deep.json'); // creatorOpenCount=8, creator_hold
+// 公开版无分析源：/analysis 路由只回 404，不再需要 dossier 样本。
 
 // ---------- 结果记账 ----------
 let failures = 0;
@@ -93,9 +95,6 @@ function makeAnalysisHandler(hitLog) {
       const ca = decodeURIComponent(m[1]);
       hitLog.push(ca);
       const send = (code, body) => { res.writeHead(code, { 'content-type': MIME['.json'] }); res.end(body || '{}'); };
-      if (ca === PONS_CA) return send(200, withAddress(DOSSIER_FAST, ca));
-      if (ca === CASHCAT_CA) return send(200, withAddress(DOSSIER_DEEP, ca));
-      if (ca === MISMATCH_CA) return send(200, JSON.stringify(DOSSIER_FAST)); // address 是别的币
       if (ca === SLOW_CA) { await sleep(900); return send(404, '{"error":"not found"}'); }
       if (ca === BOOM_CA) {
         res.writeHead(500, { 'content-type': MIME['.json'] });
@@ -119,6 +118,8 @@ const server = https.createServer({
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const PORT = server.address().port;
 const BASE = `https://analysis.test:${PORT}`;
+const ANALYSIS_TPL = `${BASE}/analysis/{ca}.json`;
+const DETAIL_TPL = `${BASE}/report/{ca}.html`;
 
 // 明文 http 站点：模拟"用户自建在内网/局域网/Tailscale 上、走 http 的 dossier 源"。
 // 页面与分析源同为 http://127.0.0.1（同源，无混合内容），host 又是 127.x 环回 →
@@ -131,6 +132,7 @@ const PRIVATE_HTTP_TPL = `${HTTP_BASE}/analysis/{ca}.json`;
 
 // v0.6 默认防线要挡掉的两种形态（开关关时）
 const HTTP_TPL = `http://analysis.test:${PORT}/analysis/{ca}.json`;
+const PRIVATE_TPL = 'https://192.168.1.5/analysis/{ca}.json';
 
 // ---------- chrome API 桩（导航前注入） ----------
 function chromeShim(fx) {
@@ -163,7 +165,8 @@ function chromeShim(fx) {
   // v0.7.2: 默认不预置 openMode/autoOpen → content.js resolveOpenMode 回落 'compact'（= 老 autoOpen:true 语义）。
   // fx.syncSeed 可注入初始 sync 值（用来测 openMode='full'/'off' 与老 autoOpen 迁移）。
   const store = {
-    sync: Object.assign({ hoverPreview: true, lang: 'zh' }, fx.syncSeed || {}),
+    sync: Object.assign({ hoverPreview: true, lang: 'zh', analysisTemplate: '', detailTemplate: '',
+            allowPrivateAnalysisSource: false }, fx.syncSeed || {}),
     local: Object.assign({}, fx.localSeed || null), session: {},
   };
   const listeners = [];
@@ -216,6 +219,8 @@ function chromeShim(fx) {
             if (t) list.push(t);
           }
           reply = { ok: true, payload: list };
+        } else if (msg.type === 'dex-pairs') {
+          reply = Array.isArray(fx.pairs) ? { ok: true, payload: fx.pairs } : { ok: false, kind: 'network' };
         } else reply = { ok: false, kind: 'network', error: 'unknown message' };
         setTimeout(() => cb(reply), 8);
       },
@@ -287,11 +292,12 @@ async function snap(page) {
         return a ? a.getAttribute('href') : null;
       })(),
       // DeBot 开发者段（关键词门）
-      devLabels: txts('.slot-debot .item .lbl'),
+      devLabels: txts('.slot-debot .item .lbl, .slot-debot-tail .item .lbl'),
       // 观点页（Thesis，DOM 抓取；v0.8 起独立标签页、点赞降序全量）
       thesisRows: sh.querySelectorAll('.slot-thesis .row-item').length,
       thesisAuthors: txts('.slot-thesis .rauthor'),
       thesisLikes: txts('.slot-thesis .rlikes'),
+      thesisTimes: txts('.slot-thesis .rtime'),
       thesisPos: txts('.slot-thesis .rval'),
       thesisPnl: txts('.slot-thesis .pnl'),
       thesisLinks: Array.from(sh.querySelectorAll('.slot-thesis .rtext a, .slot-thesis .chiplink')).map((a) => a.getAttribute('href')),
@@ -304,6 +310,10 @@ async function snap(page) {
       kolPnlPos: sh.querySelectorAll('.slot-kol .pnl.pos').length,
       kolSubs: txts('.slot-kol .rsub'),
       launcherVisible: (() => { const l = sh.querySelector('.launcher'); return l ? !l.hidden : null; })(),
+      // v0.8.3 池子交易对 chips
+      pairChips: txts('.pairchip'),
+      pairsHidden: (() => { const p = sh.querySelector('.pairs'); return p ? !!p.hidden : null; })(),
+      pairsTitle: (() => { const p = sh.querySelector('.pairs'); return p ? (p.getAttribute('title') || '') : ''; })(),
       // 推文
       tweetsOpen: (() => { const d = sh.querySelector('details.tweets'); return d ? d.open : null; })(),
       tweetsSummary: (() => { const d = sh.querySelector('details.tweets > summary'); return d ? d.textContent : ''; })(),
@@ -328,9 +338,9 @@ async function snap(page) {
       thesisTexts: txts('.slot-thesis .rtext'),
       tweetTexts: txts('details.tweets .rtext'),
       // v0.6 DeBot 段默认展开/收起状态（内容一条不少，只是默认态分层）
-      debotOrder: Array.from(sh.querySelectorAll('.slot-debot details > summary')).map((e) => e.textContent),
+      debotOrder: Array.from(sh.querySelectorAll('.slot-debot details > summary, .slot-debot-tail details > summary')).map((e) => e.textContent),
       // 折叠与否按"整段高度 - 摘要行高度"判定：折叠时 details 只占摘要一行
-      debotSections: Array.from(sh.querySelectorAll('.slot-debot details')).map((d) => {
+      debotSections: Array.from(sh.querySelectorAll('.slot-debot details, .slot-debot-tail details')).map((d) => {
         const sum = d.querySelector('summary');
         const h = d.getBoundingClientRect().height;
         const sh2 = sum ? sum.getBoundingClientRect().height : 0;
@@ -391,7 +401,7 @@ const SHIM_BASE = () => ({
   tweets: FIX.tweets, pons: FIX.pons, cashcat: FIX.cashcat, nostory: FIX.nostory,
   placeholders: FIX.placeholders, cashcatCa: CASHCAT_CA, nostoryCa: NOSTORY_CA,
   placeholderCa: PLACEHOLDER_CA, errorCa: ERROR_CA,
-  translator: null, createThrows: null, localSeed: null,
+  translator: null, createThrows: null, localSeed: null, pairs: null,
 });
 
 /** 起一个装好桩 + 真 background + 真 content 的页面。 */
@@ -462,11 +472,24 @@ try {
   await shot(page, '01-public-docked.png');
 
   // --- 1b 页脚整段移除（生成于 X 前 / 在 DeBot 打开）---
-  step('步骤 1b · 卡片页脚整段移除：无 .ftr、无"生成于"、无页脚版"在 DeBot 打开"', [
+  step('步骤 1b · 信息页脚仍不回来；页尾只有一行 By @0xHogen 署名（v0.8.9）', [
     chk('.ftr 元素不存在', s.hasFooter === false, s.hasFooter),
     chk('卡片正文无"生成于 X 前"', !s.text.includes('生成于'), s.text.includes('生成于')),
     // 空状态里的"在 DeBot 打开"是另一个入口，此处 PONS 有叙事、不该出现任何"在 DeBot 打开"
     chk('有叙事的卡片不再出现"在 DeBot 打开"', !s.text.includes('在 DeBot 打开'), s.text.includes('在 DeBot 打开')),
+    chk('页尾署名链到主人推特', await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const a = sh.querySelector('.byfoot a');
+      return !!a && a.textContent === '@0xHogen' && a.getAttribute('href') === 'https://x.com/0xHogen'
+        && a.getAttribute('rel') === 'noopener noreferrer';
+    }), null),
+    chk('来源推文排在传播上方（v0.8.9 主人定序）', await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const tweets = sh.querySelector('.slot-tweets');
+      const tail = sh.querySelector('.slot-debot-tail');
+      return !!tweets && !!tail
+        && !!(tweets.compareDocumentPosition(tail) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }), null),
   ]);
   await shotClip(page, '25-no-footer-single-toggle.png', s.cardRect);
 
@@ -488,8 +511,11 @@ try {
     chk('头部不再出现整串/半串合约地址', !/0x39db|0x39dbed3a/.test(s.hdrText), s.hdrText),
     chk('复制钮存在且带正确 tooltip',
       !!s.copyBtn && s.copyBtn.hidden === false && s.copyBtn.title === '复制合约地址', s.copyBtn),
-    chk('叙事类型 chip 仍在（主人明确要保留）',
-      s.hdrText.includes('项目类'), s.hdrText),
+    chk('叙事类型 chip 已移除（v0.8.6 腾位置给副池 chips），类型收进名字悬停提示',
+      !s.hdrText.includes('项目类') && await page.evaluate(() => {
+        const sh = window.__fomoDebotTestHandle.shadow;
+        return (sh.querySelector('.name') || {}).title === '项目类';
+      }), s.hdrText),
     chk('中/EN 双档，当前是中', s.langActive === '中', [s.langActive, s.langBtn]),
     chk('公开版无星级 → 星级行整行收起', s.starRowHidden === true, s.starRowHidden),
   ]);
@@ -516,7 +542,7 @@ try {
       chk('评级理由排第二仍保留高亮框样式',
         await page.evaluate(() => {
           const sh = window.__fomoDebotTestHandle.shadow;
-          const d = Array.from(sh.querySelectorAll('.slot-debot details'))
+          const d = Array.from(sh.querySelectorAll('.slot-debot details, .slot-debot-tail details'))
             .find((x) => (x.querySelector('summary') || {}).textContent === '评级理由');
           return !!d && d.classList.contains('rating');
         }), null),
@@ -532,7 +558,7 @@ try {
   // 展开"传播"确认内容确实还在（只是默认收起，不是被删）
   await page.evaluate(() => {
     const sh = window.__fomoDebotTestHandle.shadow;
-    for (const d of sh.querySelectorAll('.slot-debot details')) {
+    for (const d of sh.querySelectorAll('.slot-debot details, .slot-debot-tail details')) {
       const t = (d.querySelector('summary') || {}).textContent;
       if (t === '传播' || t === '开发者') d.open = true;
     }
@@ -720,12 +746,17 @@ try {
 
   // --- 10 fiber 正解 ---
   await page.hover('#row-fiber .sym');
-  await sleep(1000); // > HOVER_DEBOUNCE_MS(600) + 取数渲染
+  await sleep(1500); // > HOVER_DEBOUNCE_MS(600) + 取数渲染（机器负载高时 1000ms 偶发不够）
   s = await snap(page);
   step('步骤 10 · 无锚点行经 fiber 解析出代币 CA', [
     chk('展示 CASHCAT', s.name.includes('CASHCAT'), s.name),
     chk('CA 取自 fiber 的 token.ca', (s.state.ca || '').toLowerCase() === CASHCAT_CA, s.state.ca),
   ]);
+  // 真鼠标此刻还停在 #row-fiber 行上。后续步骤的重扫会强制 layout，Chrome 会据此
+  // 重算 hover 并补发合成 mouseover → 停满 600ms 就会（按设计）再弹一次预览，
+  // 干扰后面的标签页断言。把光标挪出左栏，别让它一直"停在行上"。
+  await page.mouse.move(900, 500);
+  await sleep(600);
 
   // --- 11 公开版默认：没配分析源 → 段不存在 ---
   await pushState(page, `/tokens/robinhood/${PONS_CA}`);
@@ -740,8 +771,8 @@ try {
 
   // --- 12 标签页结构（v0.8：五段竖排改三标签，跟 fomo 自家 tab 一个用法） ---
   step('步骤 12 · 标签页结构：叙事(默认) / 观点 / 持仓者，各 pane 装对内容', [
-    chk('标签栏为 叙事/观点/持仓者 三个（顺序即主人定的顺序）',
-      s.tabLabels.map((t) => t.replace(/\d+$/, '')).join(',') === '叙事,观点,持仓者', s.tabLabels),
+    chk('标签栏为 Meta/Thesis/Holders 三个（顺序即主人定的顺序）',
+      s.tabLabels.map((t) => t.replace(/\d+$/, '')).join(',') === 'Meta,Thesis,Holders', s.tabLabels),
     chk('默认标签是叙事', s.activeTab === 'narrative', s.activeTab),
     chk('叙事 pane 可见，观点/持仓者 pane 隐藏',
       s.paneNarrativeHidden === false && s.paneViewsHidden === true && s.paneHoldersHidden === true,
@@ -756,9 +787,6 @@ try {
     }), null),
   ]);
   await shot(page, '06-order-no-analysis.png');
-
-  // 公开版不含自定义分析源：原步骤 13-17b-2（模板取数/授权/SSRF 准入）随该能力一并移除。
-  // 「AI 判断」段永不出现由步骤 11 守住。
 
   // --- 17c 任何一段失败都只出一句友好灰字，绝不把内部 kind/原始错误串摊给主人 ---
   {
@@ -779,7 +807,8 @@ try {
     ]);
   }
 
-  // 回到 PONS 让 DOM 抓取段稳定
+  // 关掉分析源，回公开版，回到 PONS 让 DOM 抓取段稳定
+  await page.evaluate(() => window.__setSetting({ analysisTemplate: '', detailTemplate: '' }));
   await pushState(page, `/tokens/robinhood/${PONS_CA}`);
   await sleep(1000);
   s = await snap(page);
@@ -792,16 +821,21 @@ try {
     chk('仓位金额解析', s.kolPos[0] === '$29.4K', s.kolPos),
     chk('盈亏百分比紧跟仓位', s.kolPnl[0] === '▲1,163.84%', s.kolPnl),
     chk('4 涨 2 跌配色正确', s.kolPnlPos === 4 && s.kolPnlNeg === 2, [s.kolPnlPos, s.kolPnlNeg]),
-    chk('成本 = Avg. entry 列', s.kolCosts[0] === '成本 $0.000385', s.kolCosts),
+    chk('成本撤出行内（v0.8.8），收进整行悬停提示', s.kolCosts.length === 0
+      && await page.evaluate(() => {
+        const sh = window.__fomoDebotTestHandle.shadow;
+        const it = sh.querySelector('.slot-kol .row-item');
+        return !!it && it.getAttribute('title') === '成本 $0.000385';
+      }), s.kolCosts),
     chk('零网络：没有任何 fomo API 调用', !(await page.evaluate(() => window.__debotCalls.some((c) => c.indexOf('hodlers') !== -1))), null),
   ]);
 
   // --- 18b 三段式格式 + 列解析护栏 ---
   step('步骤 18b · 行格式恰好三样：@名字 · 成本 $X · $仓位 ▲盈亏%', [
-    chk('整行就是主人要的三段式',
-      s.kolLines[0] === '@31337___·成本 $0.000385·$29.4K▲1,163.84%', s.kolLines[0]),
+    chk('整行 = @名字·$仓位▲盈亏%·持有时长（v0.8.8 成本撤出）',
+      s.kolLines[0] === '@31337___·$29.4K▲1,163.84%·持有 2d 4h', s.kolLines[0]),
     chk('不再出现代币数量（76.4K PONS）', !s.kolText.includes('PONS'), s.kolText.slice(0, 140)),
-    chk('不再出现持有时长（持有 2d 4h）', !/持有\s*\d/.test(s.kolText), s.kolText.slice(0, 140)),
+    chk('持仓时长回归显示', /持有\s*2d 4h/.test(s.kolText), s.kolText.slice(0, 140)),
     chk('六个仓位值全不相同', uniq(s.kolPos).length === s.kolPos.length, s.kolPos),
     chk('顺序 = 仓位从大到小',
       s.kolPos.join(',') === '$29.4K,$18.4K,$9.1K,$5.3K,$2.2K,$1.4K', s.kolPos),
@@ -840,6 +874,8 @@ try {
     chk('没写 thesis 的持有人被跳过（paperhands/silentbag 不出现）',
       !s.thesisAuthors.includes('@paperhands') && !s.thesisAuthors.includes('@silentbag'), s.thesisAuthors),
     chk('不再从左栏 Feed 抓（feed 作者 woodchopper 不出现）', !s.thesisAuthors.includes('@woodchopper'), s.thesisAuthors),
+    chk('发言时间从评论流对上号（31337___ 2h / ogle 5m）', s.thesisTimes.join(',') === '2h,5m', s.thesisTimes),
+    chk('对不上的不硬配（MEADGod 评论文本不同 → 无时间）', s.thesisTimes.length === 2, s.thesisTimes),
   ]);
 
   // --- 19b Holders 列头本身、以及左栏 "Thesis" 标签页/过滤框，都不许被当成 thesis 条目 ---
@@ -868,15 +904,10 @@ try {
 
   // --- 19c 标签页交互：切换 / 角标 / 换币回默认 ---
   {
-    await page.evaluate(() => { window.__fomoLoadLog = []; });
     const onViews = await snap(page);   // 上面刚切到观点页
     await clickTab(page, 'holders');
     await sleep(300);
     const onHolders = await snap(page);
-    const loadLog = await page.evaluate(() => (window.__fomoLoadLog || []).slice());
-    if (onViews.activeTab !== 'views' || onHolders.activeTab !== 'holders') {
-      console.log('   [19c 诊断] loadLog =', JSON.stringify(loadLog, null, 1));
-    }
     // 换币 → 回默认叙事页
     await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
     await sleep(1200);
@@ -894,6 +925,35 @@ try {
         [onHolders.activeTab, onHolders.paneHoldersHidden]),
       chk('切换不重建内容（持仓者 6 行原样在）', onHolders.kolRows === 6, onHolders.kolRows),
       chk('换币后回到叙事页（主人定的默认）', afterSwitch.activeTab === 'narrative', afterSwitch.activeTab),
+    ]);
+  }
+
+  // --- 19d (v0.8.7) Thesis 排序切换：默认按赞；最新档 = ≥2赞且配到时间，新→旧 ---
+  {
+    await clickTab(page, 'views');
+    await sleep(150);
+    await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const btns = sh.querySelectorAll('.slot-thesis .sbtn');
+      if (btns[1]) btns[1].click();   // 切「最新 ≥2赞」
+    });
+    await sleep(150);
+    const ts = await snap(page);
+    await shotClip(page, '29-thesis-timesort.png', ts.cardRect);
+    await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const btns = sh.querySelectorAll('.slot-thesis .sbtn');
+      if (btns[0]) btns[0].click();   // 切回按赞
+    });
+    await sleep(150);
+    const back = await snap(page);
+    await clickTab(page, 'narrative');
+    await sleep(100);
+    step('步骤 19d · Thesis 排序切换：最新档只列 ≥2赞且有时间的，按时间新→旧；默认仍按赞', [
+      chk('最新档只剩 2 条（MEADGod 无时间被排除）', ts.thesisRows === 2, ts.thesisRows),
+      chk('顺序 = 5m 的 ogle 在前', ts.thesisAuthors.join(',') === '@ogle,@31337___', ts.thesisAuthors),
+      chk('切回按赞恢复 3 条原序', back.thesisAuthors.join(',') === '@31337___,@MEADGod,@ogle', back.thesisAuthors),
+      chk('角标始终报真实总条数', ts.viewsCount === '3' && back.viewsCount === '3', [ts.viewsCount, back.viewsCount]),
     ]);
   }
 
@@ -935,7 +995,8 @@ try {
       const h = document.getElementById('holders');
       if (h) { window.__lateHolders = h; h.remove(); }
     });
-    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    // 换到另一只币: 同币 pushState 不触发 load, 且 v0.8.2 抖动保护会保留上一轮成品数据
+    await pushState(page, `/tokens/robinhood/${NOSTORY_CA}`);
     await sleep(1200);
     const greyed = await snap(page);
 
@@ -956,6 +1017,76 @@ try {
         && !auto.thesisText.includes('把页面的 Holders 表滚动到可见'),
         [auto.kolText.slice(0, 40), auto.thesisText.slice(0, 40)]),
       chk('全程没点过刷新钮', true, null),
+    ]);
+  }
+
+  // --- 21d (v0.8.2) Holders 表隐藏时照样解析正确（spacedText 词界修复；线上实证 scar：
+  //     主人切到 fomo 自家 Swaps/Thesis 评论页时表还在 DOM 但 display 隐藏，裸 textContent
+  //     把点赞黏进正文/金额黏上代币数量/名字连体）---
+  {
+    await page.evaluate(() => { const h = document.getElementById('holders'); if (h) h.style.display = 'none'; });
+    await pushState(page, `/tokens/robinhood/${PLACEHOLDER_CA}`);   // 换币 → 无旧数据可保留
+    await sleep(1300);
+    const hid = await snap(page);
+    step('步骤 21d · Holders 表隐藏(display:none)时照样解析正确（spacedText 词界）', [
+      chk('thesis 3 条照常', hid.thesisRows === 3, hid.thesisRows),
+      chk('点赞照常剥出并降序（不再黏死变 0）', hid.thesisLikes.join(',') === '♥ 203,♥ 147,♥ 30', hid.thesisLikes),
+      chk('正文不被点赞数黏头', (hid.thesisTexts[0] || '').indexOf('You can now see') === 0, (hid.thesisTexts[0] || '').slice(0, 24)),
+      chk('KOL 6 行照常', hid.kolRows === 6, hid.kolRows),
+      chk('仓位金额没黏成鬼数字', hid.kolPos.join(',') === '$29.4K,$18.4K,$9.1K,$5.3K,$2.2K,$1.4K', hid.kolPos),
+      chk('无链接行名字不连体（@ogle 而非 @ogleTeam）',
+        hid.kolAuthors.includes('@ogle') && !hid.kolAuthors.some((a) => /Team/.test(a)), hid.kolAuthors),
+    ]);
+    await page.evaluate(() => { const h = document.getElementById('holders'); if (h) h.style.display = ''; });
+  }
+
+  // --- 21e (v0.8.2) 表被卸载后重扫扫空 → 保留已有数据不清屏（抖动保护）---
+  {
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1300);
+    const before = await snap(page);
+    await page.evaluate(() => {
+      const h = document.getElementById('holders');
+      if (h) { window.__keepHolders = h; h.remove(); }
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const c = sh.querySelector('.card');
+      if (c) c.dispatchEvent(new MouseEvent('mouseenter'));   // 触发 rescanNow 兜底
+    });
+    await sleep(900);
+    const after = await snap(page);
+    await page.evaluate(() => { const m = document.querySelector('main'); if (window.__keepHolders && m) m.appendChild(window.__keepHolders); });
+    await sleep(400);
+    step('步骤 21e · 表被卸载后重扫扫空 → 保留已有数据不清屏', [
+      chk('移除前有成品数据', before.kolRows === 6 && before.thesisRows === 3, [before.kolRows, before.thesisRows]),
+      chk('表移除后 KOL 数据保留', after.kolRows === 6, after.kolRows),
+      chk('Thesis 数据保留', after.thesisRows === 3, after.thesisRows),
+      chk('没有退回"滚动到可见"灰字', !after.kolText.includes('滚动到可见'), after.kolText.slice(0, 40)),
+    ]);
+  }
+
+  // --- 21f (v0.8.3) Friends only 开着且抓不到 → 空态明说原因（主人指令：别让人误解）---
+  {
+    await page.evaluate(() => {
+      const box = document.getElementById('friends-toggle');
+      if (box) box.checked = true;
+      const h = document.getElementById('holders');
+      if (h) { window.__friendsHolders = h; h.remove(); }
+    });
+    await pushState(page, `/tokens/robinhood/${SLOW_CA}`);
+    await sleep(1300);
+    const fOn = await snap(page);
+    await page.evaluate(() => {
+      const box = document.getElementById('friends-toggle');
+      if (box) box.checked = false;
+      const m = document.querySelector('main');
+      if (window.__friendsHolders && m) m.appendChild(window.__friendsHolders);
+    });
+    await sleep(1100);
+    const fOff = await snap(page);
+    step('步骤 21f · Friends only 开着且抓不到 → 空态明说"关闭它才能显示全部数据"', [
+      chk('Holders 空态点名 Friends only', fOn.kolText.includes('Friends only 筛选——关闭它才能显示全部数据'), fOn.kolText.slice(0, 60)),
+      chk('Thesis 空态同样点名', fOn.thesisText.includes('Friends only'), fOn.thesisText.slice(0, 60)),
+      chk('关掉筛选 + 表回来 → 数据恢复', fOff.kolRows === 6 && fOff.thesisRows === 3, [fOff.kolRows, fOff.thesisRows]),
     ]);
   }
 
@@ -993,7 +1124,7 @@ try {
     await closeCard();
     await sleep(200);
     await pushState(page, `/tokens/robinhood/${PONS_CA}`);
-    await sleep(700);
+    await sleep(400);                       // < 1.5s 上限；再晚 restore 会输给上限兜底出场
     const waitingB = await snap(page);
     await restore();                        // fomo 这时候才画完
     await sleep(900);
@@ -1316,6 +1447,7 @@ try {
     detail: !!document.getElementById('detailTemplate'),
     allowPrivate: !!document.getElementById('allowPrivate'),
     save: !!document.getElementById('save'),
+    byline: (() => { const a = document.querySelector('.byline a'); return a ? a.getAttribute('href') : null; })(),
   }));
   step('步骤 25 · 设置面板只剩通用组：自定义分析源整面不存在', [
     chk('只有「通用」一组', popSurface.groups === '通用', popSurface.groups),
@@ -1323,6 +1455,7 @@ try {
     chk('详情页输入框不存在', popSurface.detail === false, popSurface.detail),
     chk('高级·内网开关不存在', popSurface.allowPrivate === false, popSurface.allowPrivate),
     chk('保存数据源按钮不存在', popSurface.save === false, popSurface.save),
+    chk('页尾署名链到作者推特', popSurface.byline === 'https://x.com/0xHogen', popSurface.byline),
   ]);
   await shot(pop, '12-settings.png');
 
@@ -1454,7 +1587,7 @@ try {
         v1.options.join('|') === 'compact:精简展开（只显示起源+评级理由）|full:全部展开|off:不自动弹出（点右下角按钮才显示）',
         v1.options),
       chk('默认选中 compact', v1.value === 'compact', v1.value),
-      chk('公开版只剩「通用」一组', v1.titlesJoin === '通用', v1.titlesJoin),
+      chk('公开版只有「通用」一组', v1.titlesJoin === '通用', v1.titlesJoin),
     ]);
     await shot(pp1, '23-settings-openmode.png');
 
@@ -1478,6 +1611,55 @@ try {
     await ppOn.close();
   }
 
+  // --- 33 池子交易对 chips（v0.8.3 DexScreener 公开只读）---
+  {
+    const PAIRS_FIX = [
+      { quote: 'WETH', dex: 'uniswap', liqUsd: 4407760 },
+      { quote: 'USDG', dex: 'uniswap', liqUsd: 3536937 },
+      { quote: 'HIMS', dex: 'uniswap', liqUsd: 2100000 },
+      { quote: 'ETH',  dex: 'ramses',  liqUsd: 412987 },   // 与 WETH 归一后去重
+      { quote: 'LLY',  dex: 'giga',    liqUsd: 90000 },
+      { quote: 'NVDA', dex: 'up',      liqUsd: 50000 },
+    ];
+    const pP = await openPage({ pairs: PAIRS_FIX });
+    await pushState(pP, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const w = await snap(pP);
+    step('步骤 33 · 类型 chip 右侧只显示副池交易对（主池 ETH/稳定币剔除、去重、按流动性序）', [
+      chk('chips 可见', w.pairsHidden === false, w.pairsHidden),
+      chk('只显示副池（HIMS/LLY/NVDA），ETH/USDG 主池不占位',
+        w.pairChips.join(',') === '$HIMS,$LLY,$NVDA', w.pairChips),
+      chk('tooltip 保留全量池子（含主池，带 dex 与流动性）',
+        /uniswap/.test(w.pairsTitle) && /\$4\.4M/.test(w.pairsTitle) && /WETH/.test(w.pairsTitle), w.pairsTitle.slice(0, 100)),
+      chk('名字照常', w.name.includes('PONS'), w.name),
+    ]);
+    await shotClip(pP, '28-pair-chips.png', w.cardRect);
+    await pP.close();
+
+    const pN = await openPage();   // 默认 shim 对 dex-pairs 回失败
+    await pushState(pN, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const n = await snap(pN);
+    step('步骤 33b · 取不到池子数据 → chips 整组隐藏，头部照旧', [
+      chk('chips 隐藏', n.pairsHidden === true, n.pairsHidden),
+      chk('名字照常', n.name.includes('PONS'), n.name),
+    ]);
+    await pN.close();
+
+    // 只有主池（ETH/USDG）→ 没有值得展示的副池，chips 整组隐藏
+    const pM = await openPage({ pairs: [
+      { quote: 'WETH', dex: 'uniswap', liqUsd: 4407760 },
+      { quote: 'USDG', dex: 'uniswap', liqUsd: 3536937 },
+    ] });
+    await pushState(pM, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const m = await snap(pM);
+    step('步骤 33c · 只有主池 → chips 整组隐藏（副池才有信息量）', [
+      chk('chips 隐藏', m.pairsHidden === true, m.pairsHidden),
+    ]);
+    await pM.close();
+  }
+
 } catch (e) {
   failures++;
   console.log('FAIL  测试执行异常:', e && e.stack ? e.stack : e);
@@ -1489,7 +1671,7 @@ try {
 
 // --- 26 私有信息门禁 ---
 {
-  const SHIPPED = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'README.md'];
+  const SHIPPED = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'README.md', 'PRIVACY.md', 'LICENSE'];
   const BANNED = /黑柴|作战台|100\.121\.107\.107|second-leg|prod-api\.fomo|openclaw|home-node/i;
   const hits = [];
   for (const f of SHIPPED) {
@@ -1497,7 +1679,7 @@ try {
     body.split('\n').forEach((line, i) => { if (BANNED.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 60)}`); });
   }
   step('步骤 26 · 发布文件不含任何私有标识/内网地址/已废弃 fomo API', [
-    chk('六个发布文件全部干净', hits.length === 0, hits),
+    chk('发布文件全部干净', hits.length === 0, hits),
   ]);
 }
 
@@ -1505,15 +1687,15 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.8.0', mf.version === '0.8.0', mf.version),
+    chk('版本号为 0.8.9', mf.version === '0.8.9', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
       Array.isArray(mf.permissions) && mf.permissions.join(',') === 'storage', mf.permissions),
     chk('固定公钥在位（扩展 ID 恒定）', typeof mf.key === 'string' && mf.key.length > 300, !!mf.key),
-    chk('固定 host 授权仍只有 DeBot + FxTwitter 三个公网 https 源',
+    chk('固定 host 授权 = DeBot + FxTwitter + DexScreener 四个公网 https 源，不多一个',
       Array.isArray(mf.host_permissions)
-      && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*',
+      && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*,https://api.dexscreener.com/*',
       mf.host_permissions),
     chk('内容脚本仍只注入 fomo.family',
       mf.content_scripts[0].matches.join(',') === 'https://fomo.family/*', mf.content_scripts[0].matches),

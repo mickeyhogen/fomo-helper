@@ -59,3 +59,10 @@ ui.hoverPreview.addEventListener('change', () => {
 ui.lang.addEventListener('change', () => {
   chrome.storage.sync.set({ lang: ui.lang.value === 'en' ? 'en' : 'zh' });
 });
+
+// 底部署名带上实际版本号（测试桩里没有 chrome.runtime，静默保持无版本文案）
+try {
+  const v = chrome.runtime && chrome.runtime.getManifest && chrome.runtime.getManifest().version;
+  const bver = document.getElementById('bver');
+  if (v && bver) bver.textContent = 'Fomo放大镜 v' + v;
+} catch (_) { /* 署名行保持默认 */ }

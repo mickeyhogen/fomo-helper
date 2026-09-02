@@ -177,6 +177,7 @@
     <div class="ca">0x39dbed3a2bd333467115de45665cc57f813c4571 · 复制</div>
   </div>
   <div id="chart">CHART</div>
+  <label id="filter-friends"><input type="checkbox" id="friends-toggle"> Friends only</label>
   <div id="holders">
     <div class="holders-title">Holders (128)</div>
     <!-- 诱饵③：线上 Holders 表列头最后一列就叫 Thesis -->
@@ -267,6 +268,14 @@
       <div class="hcell"><span>$0.0044</span></div>
     </div>
   </div>
+  <!-- fomo 自家 Thesis 评论流：时间只存在于这里（开过那个 tab 才在 DOM）。
+       第一条与 31337___ 的 Holders 表 thesis 同文 → 能对上号拿到 2h；
+       第二条 MEADGod 的评论文本与其表内 thesis 不同 → 不许硬配。 -->
+  <div id="thesis-feed">
+    <div class="crow"><span>31337___</span> <span>Thesis</span> <span>2h</span> <span>$29.4K</span> <span>( ▲ 1,163.84% )</span> <span>You can now see which tokens distribute creator rewards to holders. See here: https://x.com/ponsdotfamily/status/2093207087069176051</span> <span>203</span></div>
+    <div class="crow"><span>MEADGod</span> <span>Thesis</span> <span>5h</span> <span>$18.4K</span> <span>( ▲ 42.11% )</span> <span>a totally different newer comment that must not be matched</span> <span>1</span></div>
+    <div class="crow"><span>ogle</span> <span>Thesis</span> <span>5m</span> <span>$1.4K</span> <span>( ▲ 40.20% )</span> <span>dev renounced and locked LP, this is the real deal.</span> <span>30</span></div>
+  </div>
 </main>
 
 <!-- 固定页脚：主流币快捷行情链接，含 /tokens/ 锚点，必须被悬停解析忽略 -->
@@ -277,7 +286,7 @@
 
 <script>
   // 模拟 React fiber：内部属性键以 __reactFiber 开头，且可枚举。
-  var WALLET = 'Demo111111111111111111111111111111111111111';   // base58 用户钱包
+  var WALLET = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';   // base58 用户钱包
   var CASHCAT_CA = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
 
   // fiber 行：用户钱包 + 代币 CA 同时存在 —— 正确行为是解析出代币 CA。
@@ -287,7 +296,7 @@
     memoizedProps: {
       className: 'row',
       value: {
-        fomoUser: { address: WALLET, handle: 'demo_user' },
+        fomoUser: { address: WALLET, handle: 'hogen' },
         token: { ca: CASHCAT_CA, symbol: 'CASHCAT' }
       }
     },

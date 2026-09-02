@@ -1,5 +1,5 @@
 /**
- * Fomo放大镜 — background service worker
+ * Fomo叙事镜 — background service worker
  *
  * 代发那些没有对 fomo.family 开放 CORS、必须由持 host_permissions 的后台来请求的源：
  *   1. DeBot 公开叙事 API   —— 卡片主体（固定公开端点，无需配置）
@@ -12,7 +12,6 @@
  * 消息协议：
  *   ← {type:"debot-story",    ca, force?}   → {ok:true, payload:<data.history>}
  *                                           | {ok:false, error, kind:"nostory"|"network"|"mismatch"}
- *   ← {type:"analysis-doc",   ca, force?}   → {ok:true, payload:<分析文档>}
  *                                           | {ok:false, error, kind:"disabled"|"absent"|"network"|"no-permission"}
  *   ← {type:"debot-tweets",   ids[], force?}→ {ok:true, payload:[{id,text,author,url}]}
  */
@@ -24,8 +23,7 @@ const TTL_MS = 10 * 60 * 1000;
 const TIMEOUT_MS = 15000;
 const SESSION_PREFIX = 'debot-story:';
 
-// 自定义分析源：URL 模板来自设置，{ca} 替换成代币地址。
-// 可能指向内网/自建服务，慢了不能拖住 DeBot 段，所以硬超时很短。
+// FxTwitter 公开推文
 const TWEET_BASE = 'https://api.fxtwitter.com/i/status/';
 const TWEET_TTL_MS = 30 * 60 * 1000;
 const TWEET_TIMEOUT_MS = 6000;
@@ -33,45 +31,8 @@ const TWEET_PREFIX = 'debot-tweet:';
 const TWEET_MAX = 3;
 
 const SETTING_DEFAULTS = {
-  // 高级·仅自用：允许 http / 内网 / 自建分析源（默认 false = 只收 https 公网地址）。
-  // 只影响用户自配的分析源；DeBot / FxTwitter 永远锁死在各自的固定公网 https 端点。
+  // 公开版不含「自定义分析源」：没有设置入口，后台也没有对应请求路径。
 };
-
-let settingsMemo = null;
-let settingsPending = null;
-let settingsGen = 0;
-
-/**
- * 单飞（single-flight）：同一时刻并发的多条消息共用一次 storage 读取，
- * 免得"读到一半的设置"被不同请求各看到一半。读取期间设置若被改动（generation 变了），
- * 这次结果只返回不落缓存，下一次重新读。
- */
-async function getSettings() {
-  if (settingsMemo) return settingsMemo;
-  if (!settingsPending) {
-    const gen = settingsGen;
-    settingsPending = (async () => {
-      let val;
-      try {
-        const v = await chrome.storage.sync.get(SETTING_DEFAULTS);
-        val = Object.assign({}, SETTING_DEFAULTS, v || {});
-      } catch (_) {
-        val = Object.assign({}, SETTING_DEFAULTS);
-      }
-      if (gen === settingsGen) settingsMemo = val;
-      return val;
-    })();
-    settingsPending.catch(() => {}).then(() => { settingsPending = null; });
-  }
-  return settingsPending;
-}
-
-try {
-  chrome.storage.onChanged.addListener((_c, area) => {
-    // 设置改了立刻失效，下次读新的；在途的那次读取也不许再写缓存
-    if (area === 'sync') { settingsMemo = null; settingsGen++; }
-  });
-} catch (_) { /* 忽略 */ }
 
 /** @type {Map<string, {at:number, res:object}>} */
 const memCache = new Map();
@@ -138,8 +99,6 @@ async function fetchJson(url, timeoutMs) {
       signal: ctrl.signal,
       credentials: 'omit',
       cache: 'no-store',
-      // 准入校验只作用于初始 URL；跟随跳转会让校验被绕过(含 https→http 降级)，故一律不跟随。
-      redirect: 'error',
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return { stage: 'http', status: res.status };
@@ -229,10 +188,6 @@ async function handleStory(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// 2) 自定义分析源（用户自配 URL 模板；没配 = 这段不存在）
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // 3) FxTwitter 来源推文正文
 // ---------------------------------------------------------------------------
 
@@ -275,14 +230,69 @@ async function handleTweets(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// 4) DexScreener 池子/交易对（v0.8.3）
+//    固定公网只读端点，与 DeBot / FxTwitter 同一信任模型：不登录、不带 cookie、
+//    不受「高级·仅自用」开关影响。失败静默（头部不出 chips），绝不拖累其它段。
+// ---------------------------------------------------------------------------
+
+const PAIRS_BASE = 'https://api.dexscreener.com/latest/dex/tokens/';
+const PAIRS_TTL_MS = 10 * 60 * 1000;
+const PAIRS_TIMEOUT_MS = 6000;
+const PAIRS_PREFIX = 'dex-pairs:';
+const PAIRS_MAX = 12;   // 给前端的池子行数上限（前端再按报价资产去重取前几个 chip）
+
+async function handlePairs(msg) {
+  const ca = msg && typeof msg.ca === 'string' ? msg.ca.trim() : '';
+  const chain = msg && typeof msg.chain === 'string' ? msg.chain.trim().toLowerCase() : '';
+  if (!ca) return { ok: false, kind: 'network' };
+
+  const key = cacheKey(ca) + '|' + chain;
+  if (!msg.force) {
+    const cached = await readCache(PAIRS_PREFIX, key, PAIRS_TTL_MS);
+    if (cached) return cached;
+  }
+
+  const out = await fetchJson(PAIRS_BASE + encodeURIComponent(cacheKey(ca)), PAIRS_TIMEOUT_MS);
+  if (out.stage !== 'json' || !out.json || !Array.isArray(out.json.pairs)) {
+    return { ok: false, kind: 'network' };   // 失败不缓存，下次自然重试
+  }
+
+  // 只留本链、且我们这只币在场的池子；对手方 = 另一侧的 symbol。
+  // 字段裁剪到最小——三方响应绝不整包透传给前端。
+  const rows = [];
+  for (const p of out.json.pairs) {
+    if (!p || typeof p !== 'object') continue;
+    if (chain && String(p.chainId || '').toLowerCase() !== chain) continue;
+    const base = p.baseToken || {};
+    const quote = p.quoteToken || {};
+    let partner = null;
+    if (sameCa(base.address, ca)) partner = quote;
+    else if (sameCa(quote.address, ca)) partner = base;
+    if (!partner) continue;
+    const sym = String(partner.symbol || '').trim();
+    if (!sym || sym.length > 12) continue;
+    rows.push({
+      quote: sym.slice(0, 12),
+      dex: String(p.dexId || '').slice(0, 24),
+      liqUsd: Number((p.liquidity && p.liquidity.usd) || 0) || 0,
+    });
+  }
+  rows.sort((a, b) => b.liqUsd - a.liqUsd);
+  const res = { ok: true, payload: rows.slice(0, PAIRS_MAX) };
+  await writeCache(PAIRS_PREFIX, key, res);
+  return res;
+}
+
+// ---------------------------------------------------------------------------
 // 路由
 // ---------------------------------------------------------------------------
 
 const ROUTES = {
   'debot-story': handleStory,
-  // 公开版不含自定义分析源：保留路由存根，content.js 即便询问也只会拿到 disabled。
-  'analysis-doc': async () => ({ ok: false, kind: 'disabled', error: '公开版不含分析源' }),
+  // 公开版不含分析源：保留路由名只为让前端那一段安静地降级，绝不发任何请求。
+  'analysis-doc': async () => ({ ok: false, kind: 'disabled' }),
   'debot-tweets': handleTweets,
+  'dex-pairs': handlePairs,
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

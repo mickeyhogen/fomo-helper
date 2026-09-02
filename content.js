@@ -122,6 +122,7 @@
     // v0.8：卡片顶部三个标签页（跟 fomo 自家 tab 的用法一致）。
     // 'narrative' 叙事（默认）| 'views' 观点（持有人 thesis，按点赞排）| 'holders' 持仓者
     tab: 'narrative',
+    thesisSort: 'likes',  // v0.8.7：'likes' 按赞（默认）| 'time' 最新（≥2赞且配到时间的）；换币不重置
     tweetsOpen: false,   // 来源推文段是否展开
     status: 'idle',      // DeBot 段状态（对外兼容字段）
     history: null,       // DeBot data.history
@@ -130,7 +131,9 @@
     seq: 0,              // 请求序号，防竞态
     analysis: blank(),   // 自定义分析源判断
     holders: blank(),    // 从页面 DOM 抓的持仓表
-    thesis: blank(),     // 从页面 Feed DOM 抓的 thesis
+    thesis: blank(),     // 从页面 Holders 表抓的 thesis
+    scrapeFp: { holders: '', thesis: '' },  // 抓取指纹：没变就不重渲染
+    pairs: blank(),      // DexScreener 池子交易对（头部 chips）
     tweets: blank(),     // 来源推文
   };
 
@@ -347,6 +350,8 @@
     }
   }
 
+  const requestPairs = (ca, chain, force, cb) =>
+    sendMsg({ type: 'dex-pairs', ca, chain: chain || '', force: !!force }, cb);
   const requestStory = (ca, force, cb) =>
     sendMsg({ type: 'debot-story', ca, force: !!force }, cb);
   const requestAnalysis = (ca, force, cb) =>
@@ -416,6 +421,23 @@
         border-radius: 999px; padding: 1px 8px; flex: 0 1 auto; max-width: 92px;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip.pv { color: #ffb454; border-color: rgba(255,180,84,.4); background: rgba(255,180,84,.08); }
+/* v0.8.3：类型 chip 右侧的池子交易对 chips（DexScreener），挤不下就整组裁切 */
+.pairs { display: flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.pairchip { font-size: 10px; color: #8fbaff; background: rgba(91,156,255,.08);
+            border: 1px solid rgba(91,156,255,.25); border-radius: 999px; padding: 0 6px;
+            white-space: nowrap; line-height: 1.6; flex: 0 0 auto; }
+.pairchip.more { color: #6a6e76; background: #1a1c20; border-color: #26282c; }
+/* v0.8.7：Thesis 页排序切换（按赞 / 最新） */
+.sortrow { display: flex; gap: 4px; margin: 1px 0 6px; }
+.sbtn { background: none; border: 1px solid #26282c; color: #7f8590; cursor: pointer;
+        border-radius: 999px; padding: 1px 9px; font-size: 11px; line-height: 1.6; }
+.sbtn:hover { color: #d3d6dc; border-color: #3a3d44; }
+.sbtn.on { color: #fff; border-color: #4a4d54; background: #1a1c20; }
+/* v0.8.9：页尾署名 */
+.byfoot { flex: 0 0 auto; text-align: right; font-size: 10px; color: #4a4d54;
+          padding: 3px 12px 5px; border-top: 1px solid #1e2024; letter-spacing: .3px; }
+.byfoot a { color: #6a6e76; text-decoration: none; }
+.byfoot a:hover { color: #9aa0aa; text-decoration: underline; }
 .body {
   /* v0.7.3：页脚整段移除后，正文底 padding 补到 10px，最后一段收口不贴边 */
   padding: 10px 12px 10px; overflow-y: auto; overflow-x: hidden; flex: 1 1 auto;
@@ -582,9 +604,12 @@ details.tweets > summary { color: #9aa0aa; }
     // v0.7 布局：左边是"这是什么币"（名字 + 类型 + 预览角标），
     // 右边一组图标钮（复制/固定/中EN/重抓/关闭），星级另起一行不跟着挤。
     const stars = h('span', { cls: 'stars' });
-    const typeChip = h('span', { cls: 'chip' });
+    // v0.8.6：叙事类型 chip（项目类/人物类/事件类）撤掉腾位置给副池 chips（主人：不够位置了）；
+    // 类型信息收进名字的悬停提示，不丢。
+    const pairsWrap = h('span', { cls: 'pairs' });
+    pairsWrap.hidden = true;
     const pvChip = h('span', { cls: 'chip pv', text: '预览' });
-    const hdrTop = h('div', { cls: 'hdr-top' }, [name, typeChip, pvChip,
+    const hdrTop = h('div', { cls: 'hdr-top' }, [name, pairsWrap, pvChip,
       h('span', { cls: 'spacer' }),
       h('div', { cls: 'hdr-acts' }, [caBtn, pinBtn, langBtn, refreshBtn, closeBtn])]);
     const starRow = h('div', { cls: 'hdr-stars' }, [stars]);
@@ -597,12 +622,14 @@ details.tweets > summary { color: #9aa0aa; }
     // 持仓者 = KOL 持仓。五个 slot 仍各自独立填充——渲染不看标签页是否可见，
     // 切过去内容已经在了。
     const slotDebot = h('div', { cls: 'slot slot-debot' });
+    // v0.8.9 主人定的 Meta 页顺序：起源/评级理由 → AI 判断 → 来源推文 → 传播/开发者
+    const slotDebotTail = h('div', { cls: 'slot slot-debot-tail' });
     const slotThesis = h('div', { cls: 'slot slot-thesis' });
     const slotAnalysis = h('div', { cls: 'slot slot-analysis' });
     const slotKol = h('div', { cls: 'slot slot-kol' });
     const slotTweets = h('div', { cls: 'slot slot-tweets' });
     const paneNarrative = h('div', { cls: 'pane pane-narrative' },
-      [slotDebot, slotAnalysis, slotTweets]);
+      [slotDebot, slotAnalysis, slotTweets, slotDebotTail]);
     const paneViews = h('div', { cls: 'pane pane-views' }, [slotThesis]);
     const paneHolders = h('div', { cls: 'pane pane-holders' }, [slotKol]);
     paneViews.hidden = true;
@@ -610,7 +637,7 @@ details.tweets > summary { color: #9aa0aa; }
 
     const tabBtns = [];
     const tabDefs = [
-      ['narrative', '叙事'], ['views', '观点'], ['holders', '持仓者'],
+      ['narrative', 'Meta'], ['views', 'Thesis'], ['holders', 'Holders'],
     ];
     for (const [key, label] of tabDefs) {
       const count = h('span', { cls: 'tcount' });
@@ -624,16 +651,21 @@ details.tweets > summary { color: #9aa0aa; }
     const tabs = h('div', { cls: 'tabs' }, tabBtns);
 
     const body = h('div', { cls: 'body' }, [paneNarrative, paneViews, paneHolders]);
-    // v0.7.3：整段页脚（生成于 X 前 / 在 DeBot 打开）已移除，卡片只剩 头 + 标签栏 + 正文。
-    card = h('div', { cls: 'card' }, [hdr, tabs, body]);
+    // v0.8.9：页尾只有一行署名（v0.7.3 撤掉的信息页脚不回来）。
+    const byfoot = h('div', { cls: 'byfoot' }, [
+      h('span', { text: 'By ' }),
+      h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
+        attrs: { target: '_blank', rel: 'noopener noreferrer' } }),
+    ]);
+    card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot]);
     card.hidden = true;
     card.addEventListener('mouseenter', () => { cancelHide(); rescanNow(); });
     card.addEventListener('mouseleave', () => { if (state.mode === 'preview') scheduleHide(); });
 
     // --- 圆钮 ---
     launcher = h('button', {
-      cls: 'launcher', text: '叙', attrs: { type: 'button' },
-      title: 'Fomo放大镜：查看当前代币叙事',
+      cls: 'launcher', text: '🔍', attrs: { type: 'button' },
+      title: 'Fomo放大镜：查看当前代币的叙事/观点/持仓',
       on: { click: onLauncherClick },
     });
 
@@ -642,9 +674,9 @@ details.tweets > summary { color: #9aa0aa; }
     document.documentElement.appendChild(host);
 
     els = { name, caBtn, pinBtn, langBtn, langZh, langEn, langSep, langBusy, stars, starRow,
-            typeChip, pvChip, hdr, body, tabBtns,
+            pairsWrap, pvChip, hdr, body, tabBtns,
             paneNarrative, paneViews, paneHolders,
-            slotDebot, slotThesis, slotAnalysis, slotKol, slotTweets };
+            slotDebot, slotDebotTail, slotThesis, slotAnalysis, slotKol, slotTweets };
     applyPos();
   }
 
@@ -861,10 +893,6 @@ details.tweets > summary { color: #9aa0aa; }
    * 关键纪律：自配分析源(2.5s 硬超时)与 fomo 取数都不得延后 DeBot 段的显示。
    */
   function load(ca, chain, mode, force) {
-    if (TEST) {
-      (globalThis.__fomoLoadLog = globalThis.__fomoLoadLog || [])
-        .push(Date.now() + ':' + mode + ':' + String(ca || '').slice(0, 10) + ':' + (new Error().stack || '').split('\n').slice(2, 4).join('|'));
-    }
     ensureUi();
     cancelHide();
     state.ca = ca;
@@ -885,6 +913,8 @@ details.tweets > summary { color: #9aa0aa; }
     state.analysis = { status: analysisOn ? 'loading' : 'disabled', data: null, error: null };
     state.holders = { status: 'scanning', data: null, error: null };
     state.thesis = { status: 'scanning', data: null, error: null };
+    state.scrapeFp = { holders: '', thesis: '' };   // 换币必重画，指纹清零
+    state.pairs = { status: 'loading', data: null, error: null };
     state.tweets = { status: 'idle', data: null, error: null };
     const seq = ++state.seq;
 
@@ -901,11 +931,21 @@ details.tweets > summary { color: #9aa0aa; }
 
     paintChrome();
     paintHeader();
+    renderPairs();
     renderDebot();
     renderThesis();
     renderAnalysis();
     renderKol();
     renderTweets();
+
+    // 0) 池子交易对（DexScreener 公开只读；失败静默，头部就是没有 chips 而已）
+    requestPairs(ca, chain, force, (resp) => {
+      if (seq !== state.seq) return;
+      state.pairs = (resp && resp.ok && Array.isArray(resp.payload))
+        ? { status: 'ready', data: resp.payload, error: null }
+        : { status: 'error', data: null, error: null };
+      renderPairs();
+    });
 
     // 1) DeBot 叙事（主体）
     requestStory(ca, force, (resp) => {
@@ -996,8 +1036,56 @@ details.tweets > summary { color: #9aa0aa; }
     state.tab = key;
     paintTabs();
     if (els && els.body) els.body.scrollTop = 0;
-    // 切到 观点/持仓者 时顺手重扫一次：Holders 表往往是主人此刻才滚出来的
-    if (key !== 'narrative') rescanNow();
+    // 切到 观点/持仓者 且那页还没抓到数据时才顺手重扫（Holders 表往往是主人此刻才滚出来的）；
+    // 已有数据的切换纯属阅读，不为它做全页扫描/强制 layout（K3 审查建议）。
+    if (key !== 'narrative') {
+      const st = key === 'views' ? state.thesis : state.holders;
+      const feedMissing = key === 'views' && state.thesisSort === 'time'
+        && !(st && Array.isArray(st.feed) && st.feed.length);
+      if (!st || st.status !== 'ready' || feedMissing) rescanNow();
+    }
+  }
+
+  // ---------- v0.8.3 池子交易对 chips ----------
+  const PAIR_SHOW = 4;   // 头部最多摆几个报价资产 chip，其余收进 +N 与 tooltip
+
+  function fmtUsd(n) {
+    const v = Number(n) || 0;
+    if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+    if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+    return '$' + Math.round(v);
+  }
+
+  // 主流报价资产（主池）：每只币都有，不占 chip 位（主人 2026-09-02：只要 $TSLA 这类副池）。
+  // 全量池子仍留在 tooltip 里做参考。
+  const PAIR_STD_QUOTES = ['ETH', 'WETH', 'USDG', 'USDC', 'USDT', 'DAI', 'WBTC', 'BTC'];
+
+  /** 类型 chip 右侧：这只币的**副池**交易对（剔除 ETH/稳定币主池，按流动性排序）。 */
+  function renderPairs() {
+    if (!els) return;
+    const wrap = els.pairsWrap;
+    wrap.textContent = '';
+    const rows = (state.pairs.status === 'ready' && Array.isArray(state.pairs.data))
+      ? state.pairs.data : [];
+    const syms = [];
+    for (const r of rows) {
+      let sym = String((r && r.quote) || '').trim().toUpperCase().replace(/^\$+/, '');
+      if (!sym || sym.length > 12) continue;
+      if (sym === 'WETH') sym = 'ETH';
+      if (PAIR_STD_QUOTES.indexOf(sym) !== -1) continue;   // 主池不占位
+      if (syms.indexOf(sym) === -1) syms.push(sym);
+    }
+    const show = syms.slice(0, PAIR_SHOW);
+    wrap.hidden = !show.length;
+    if (!show.length) return;
+    for (const s of show) wrap.appendChild(h('span', { cls: 'pairchip', text: '$' + s }));
+    if (syms.length > show.length) {
+      wrap.appendChild(h('span', { cls: 'pairchip more', text: '+' + (syms.length - show.length) }));
+    }
+    wrap.setAttribute('title', '流动性池报价资产（按流动性排序）\n' + rows.slice(0, 8)
+      .map((r) => '$' + String((r && r.quote) || '?').toUpperCase()
+        + ' · ' + ((r && r.dex) || '?') + ' · ' + fmtUsd(r && r.liqUsd)).join('\n'));
   }
 
   /** 观点/持仓者 标签上的条数角标；null/0 = 不显示。 */
@@ -1067,12 +1155,10 @@ details.tweets > summary { color: #9aa0aa; }
     // 星级只在个人模式出现；没有星就整行收掉，不留空白
     els.starRow.hidden = !els.stars.childNodes.length;
 
-    if (story && nonEmpty(story.narrative_type)) {
-      els.typeChip.textContent = story.narrative_type.trim();
-      els.typeChip.hidden = false;
-    } else {
-      els.typeChip.hidden = true;
-    }
+    // v0.8.6：叙事类型不再占头部空间，悬停名字可见
+    try {
+      els.name.title = (story && nonEmpty(story.narrative_type)) ? story.narrative_type.trim() : '';
+    } catch (_) { /* 忽略 */ }
   }
 
   function pickStory(hist, lang) {
@@ -1122,6 +1208,8 @@ details.tweets > summary { color: #9aa0aa; }
   function renderDebot() {
     if (!els) return;
     const body = els.slotDebot;
+    const tail = els.slotDebotTail;
+    tail.textContent = '';
 
     if (state.status === 'loading') {
       body.textContent = '';
@@ -1139,9 +1227,10 @@ details.tweets > summary { color: #9aa0aa; }
     const story = pickStory(hist, lang);
     if (!story) return renderEmptyState();
 
-    // --- 正文 ---
+    // --- 正文（v0.8.9 拆两截：起源/评级理由在推文上方，传播/开发者在推文下方）---
     body.textContent = '';
     const add = (node) => { if (node) body.appendChild(node); };
+    const addTail = (node) => { if (node) tail.appendChild(node); };
 
     // v0.7 阅读顺序（主人定）：起源 → 评级理由 → 传播 → 开发者。
     // 先回答"这币是什么"，再给"该怎么看它"，最后才是可选的细节。
@@ -1162,7 +1251,7 @@ details.tweets > summary { color: #9aa0aa; }
     // 传播（六项全是占位词时，sectionNode 会让整段消失）。
     // 精简布局默认收起；full 布局跟着"全部展开"一起摊开。
     const dist = story.distribution || {};
-    add(sectionNode('传播', [
+    addTail(sectionNode('传播', [
       fieldNode('名人背书', dist.celebrity_support),
       fieldNode('最高浏览', dist.max_views),
       fieldNode('最高点赞', dist.max_likes),
@@ -1174,13 +1263,13 @@ details.tweets > summary { color: #9aa0aa; }
     // 开发者：只有命中风险/强信号关键词的文字行才占版面；两行都不命中 → 整段不出现。
     // （v0.5 起不再显示 fomo 开发者战绩——那需要被 CF 挡掉的 API，开源版拿不到。）
     const dev = story.developer_info || {};
-    add(sectionNode('开发者', [
+    addTail(sectionNode('开发者', [
       devWorthShowing(dev.identity && dev.identity.text) ? fieldNode('身份', dev.identity) : null,
       devWorthShowing(dev.address_analysis && dev.address_analysis.text)
         ? fieldNode('地址分析', dev.address_analysis) : null,
     ], '', state.compact));
 
-    if (!body.childNodes.length) {
+    if (!body.childNodes.length && !tail.childNodes.length) {
       body.appendChild(h('div', { cls: 'state' },
         [h('span', { text: '这条叙事记录里没有可展示的内容' })]));
     }
@@ -1188,6 +1277,7 @@ details.tweets > summary { color: #9aa0aa; }
 
   function renderEmptyState() {
     els.slotDebot.textContent = '';
+    els.slotDebotTail.textContent = '';
     els.slotDebot.appendChild(h('div', { cls: 'state' }, [
       h('span', { cls: 'em', text: 'DeBot 还没有这只币的叙事记录' }),
       h('a', {
@@ -1199,6 +1289,7 @@ details.tweets > summary { color: #9aa0aa; }
 
   function renderErrorState() {
     els.slotDebot.textContent = '';
+    els.slotDebotTail.textContent = '';
     els.slotDebot.appendChild(h('div', { cls: 'state' }, [
       h('span', { cls: 'em', text: FRIENDLY.debot }),
       h('button', {
@@ -1274,8 +1365,20 @@ details.tweets > summary { color: #9aa0aa; }
     reset() { this.segs = []; this.userOff = false; },
 
 
+    /**
+     * 抓取器每次重扫都整段重建 DOM，旧节点断连后仍留在 segs 里——applyOne 有
+     * isConnected 守卫不会写错地方，但列表会无界增长（v0.8 观点页全量后每轮 +几十条）。
+     * 便宜的兜底：翻译前和列表偏大时清一次死段。
+     */
+    prune() {
+      this.segs = this.segs.filter((s) => {
+        try { return s && s.el && s.el.isConnected; } catch (_) { return false; }
+      });
+    },
+
     register(el, text) {
       const seg = { el, original: text };
+      if (this.segs.length > 400) this.prune();
       this.segs.push(seg);
       if (!this.on) return;
       // 抓取器每次重扫都会重建这些节点。缓存里已有译文就同步写回，
@@ -1435,7 +1538,7 @@ details.tweets > summary { color: #9aa0aa; }
       this.applyAll();
     },
 
-    applyAll() { for (const seg of this.segs) this.applyOne(seg); },
+    applyAll() { this.prune(); for (const seg of this.segs) this.applyOne(seg); },
 
     async applyOne(seg) {
       if (!this.inst || !this.on || !seg || !worthTranslating(seg.original)) return;
@@ -1455,8 +1558,29 @@ details.tweets > summary { color: #9aa0aa; }
   // fomo 用哈希化的 CSS 类名，绝不能靠 class 选择器；这里全部基于文本特征。
   // 两个抓取器都必须防御：抓不到就显示一行灰字，永远不报错。
 
-  const cleanText = (el) => String((el && (el.innerText || el.textContent)) || '')
-    .replace(/\u00a0/g, ' ');
+  /**
+   * \u6293\u53d6\u8def\u5f84\u7684\u53d6\u6587\u672c\u51fd\u6570\uff08v0.8.2\uff0c2026-09-02 \u7ebf\u4e0a\u5b9e\u8bc1\u91cd\u5199\uff09\uff1a
+   * \u4e0d\u80fd\u7528 innerText\u2014\u2014Chrome \u7684 innerText \u5728 flex/inline \u5144\u5f1f\u5355\u5143\u683c\u4e4b\u95f4**\u4e0d\u8865\u4efb\u4f55\u5206\u9694\u7b26**\uff0c
+   * fomo \u7684\u884c\u6070\u662f flex \u5e03\u5c40\uff0c\u4e8e\u662f\u6574\u884c\u9ecf\u6210"231You can\u2026"\uff08\u70b9\u8d5e\u6570\u5265\u4e0d\u6389 \u2192 \u5168\u90e8 0 \u8d5e\u3001\u6392\u5e8f\u5931\u6548\uff09\u3001
+   * "$775,969.072M"\uff08\u91d1\u989d\u9ecf\u4e0a\u4ee3\u5e01\u6570\u91cf \u2192 \u9b3c\u6570\u5b57\uff09\u3001"MEADGodTeam"\uff08\u540d\u5b57\u8fde\u4f53\uff09\u3001\u5217\u5934\u8bcd\u754c\u5224\u5b9a\u5931\u6548
+   * \uff08\u672c\u5730 mock \u7684\u6587\u672c\u8282\u70b9\u51d1\u5de7\u81ea\u5e26\u7a7a\u683c\uff0c\u624d\u4e00\u76f4\u6ca1\u66b4\u9732\uff09\u3002\u4e5f\u4e0d\u80fd\u7528\u88f8 textContent\u2014\u2014\u540c\u6837\u9ecf\u3002
+   * \u552f\u4e00\u7a33\u7684\uff1a\u628a\u540e\u4ee3\u6587\u672c\u8282\u70b9\u7528\u7a7a\u683c\u9010\u4e2a\u62fc\u63a5\uff0c\u8bcd\u754c\u6c38\u8fdc\u5728\uff1b\u9690\u85cf\u8282\u70b9\uff08\u4e3b\u4eba\u5207\u5230 fomo \u81ea\u5bb6
+   * Swaps/Thesis \u8bc4\u8bba\u9875\u65f6 Holders \u8868\u4ecd\u5728 DOM \u4f46\u88ab\u9690\u85cf\uff09\u540c\u6837\u9002\u7528\u3002
+   */
+  function spacedText(el) {
+    if (!el) return '';
+    let out = '';
+    try {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = walker.nextNode())) {
+        const s = String(n.nodeValue || '').trim();
+        if (s) out += (out ? ' ' : '') + s;
+      }
+    } catch (_) { out = String((el && el.textContent) || ''); }
+    return out;
+  }
+  const cleanText = (el) => spacedText(el).replace(/\u00a0/g, ' ');
   const oneLine = (str) => String(str || '').replace(/\s+/g, ' ').trim();
 
   // 金额 token：带符号的排在前面，保证 "+$2,436" 整体成一个 token 而不是被拆成 "$2,436"
@@ -1518,7 +1642,8 @@ details.tweets > summary { color: #9aa0aa; }
       for (let i = 0; i < 6 && row; i++) {
         const rt = row.textContent || '';
         if (holdCount(rt) > 1) { row = prev; break; }
-        const money = moneyTokens(rt);
+        // 金额判定必须走 cleanText（隐藏表的裸 textContent 会把金额黏上邻格，见 spacedText 注释）
+        const money = moneyTokens(cleanText(row));
         if (money.length >= 2 || (money.length >= 1 && /%/.test(rt))) break;
         prev = row;
         row = row.parentElement;
@@ -1536,9 +1661,20 @@ details.tweets > summary { color: #9aa0aa; }
     const money = moneyTokens(flat);
     const plain = money.filter((m) => !isSignedMoney(m));
     const signed = money.filter(isSignedMoney);
+    const position = plain[0] || '';
+    // 线上实证两件事：①行里有响应式复制出来的仓位值单元格（同值 $ 出现两次）——跳过与
+    // 仓位同值的 token；②Avg. entry 列长这样 "$156.7M MC $0.157"（入场市值 + 入场价）——
+    // 成本要的是价格，优先取无 K/M/B 后缀的"价格样" token，市值样只做兜底。
+    let avgEntry = '';
+    for (let i = 1; i < plain.length; i++) {
+      const t = plain[i];
+      if (t === position) continue;
+      if (!/[KMBkmb]$/.test(t)) { avgEntry = t; break; }
+      if (!avgEntry) avgEntry = t;
+    }
     return {
-      position: plain[0] || '',
-      avgEntry: plain[1] || '',
+      position,
+      avgEntry,
       pnlUsd: signed[0] || '',
       pct: flat.match(PCT_RE),
     };
@@ -1573,10 +1709,11 @@ details.tweets > summary { color: #9aa0aa; }
       }
       const signed = money.find(isSignedMoney);
       if (signed) { if (!pnlUsd) pnlUsd = signed; continue; }
-      const plain = money.find((m) => !isSignedMoney(m));
-      if (!plain) continue;
-      if (!position) position = plain;
-      else if (!avgEntry) avgEntry = plain;
+      const plains = money.filter((m) => !isSignedMoney(m));
+      if (!plains.length) continue;
+      if (!position) position = plains[0];
+      // 成本列可能是 "$156.7M MC $0.157"：优先价格样（无 K/M/B 后缀）
+      else if (!avgEntry) avgEntry = plains.find((m) => !/[KMBkmb]$/.test(m)) || plains[0];
     }
     if (!position && !pnlUsd && !pct) return null;
     return { position, avgEntry, pnlUsd, pct };
@@ -1629,7 +1766,8 @@ details.tweets > summary { color: #9aa0aa; }
       pnl = pnlUsd;
     }
 
-    const holdM = flat.match(/([\d]+\s*[dhm](?:\s*[\d]+\s*[dhm])?)\s*avg\.?\s*hold/i);
+    // 时长单位放宽到 mo/w（"1mo avg. hold" 这种老持有人以前会解析成空）
+    const holdM = flat.match(/([\d]+\s*(?:mo|[dhmsw])(?:\s*[\d]+\s*(?:mo|[dhmsw]))?)\s*avg\.?\s*hold/i);
     const avgHold = holdM ? oneLine(holdM[1]) : '';
 
     // 至少要有仓位或盈亏才算一行有效数据
@@ -1792,8 +1930,10 @@ details.tweets > summary { color: #9aa0aa; }
     } else {
       for (const c of cellEls) {
         const ct = oneLine(cleanText(c));
+        // 词数阈值对无空格的中文失效（整段算 1 个"词"）→ 补 CJK 字符量判据（K3 审查修正）
         if (/https:\/\/|x\.com\//i.test(ct)
-          || ct.split(/\s+/).filter(Boolean).length > 6) { cell = c; break; }
+          || ct.split(/\s+/).filter(Boolean).length > 6
+          || (cjkRatio(ct) >= 0.2 && ct.replace(/\s+/g, '').length > 12)) { cell = c; break; }
       }
     }
     if (!cell) return null;
@@ -1828,18 +1968,104 @@ details.tweets > summary { color: #9aa0aa; }
    * 与 KOL 共用 collectHolderRows()——同一张表，懒加载一起被接住。
    * 排序后去重（按正文），点赞多→少（无赞按行序，稳定排序）。
    */
+  // ---- Thesis 发言时间（v0.8.6 机会主义增强）--------------------------------
+  // Holders 表的 Thesis 列没有时间戳（2026-09-02 线上逐格实证）；时间只存在于 fomo
+  // 自家的 Thesis 评论流里，且只在主人开过那个 tab 后才渲染进 DOM。所以只做
+  // "有就配、配不上就不显示"：按 作者 + 正文前缀 双条件对号，宁缺毋错。
+  /** fomo 的相对时间（"2h"/"9m"/"3d"/"just now"）→ 分钟数；解析不出返回 null。 */
+  function relAgeMinutes(t) {
+    const str = String(t || '').trim().toLowerCase();
+    if (!str) return null;
+    if (str === 'just now') return 0;
+    const m = /^(\d+)\s*(mo|[smhdw])$/.exec(str);
+    if (!m) return null;
+    const mult = { s: 1 / 60, m: 1, h: 60, d: 1440, w: 10080, mo: 43200 }[m[2]];
+    return parseInt(m[1], 10) * mult;
+  }
+
+  const COMMENT_HEAD_RE = /^(@?[A-Za-z0-9_.\-]{2,25}) Thesis (\d+\s?(?:mo|[smhdw])|just now)\b/;
+  const COMMENT_HEAD_G = /(?:^|\s)@?[A-Za-z0-9_.\-]{2,25} Thesis (?:\d+\s?(?:mo|[smhdw])|just now)\b/g;
+
+  /**
+   * fomo 自家 Thesis 评论流（主人开过那个 tab 才渲染进 DOM）：一条评论 =
+   * "作者 Thesis 时间 $持仓 ( ▲盈亏% ) 正文 点赞 [N older]"。
+   * 线上实证（2026-09-02）：作者+徽章+时间是一个小头部元素，正文在外层——
+   * 所以从头部命中处向上爬到"完整一行"（再往上会裹进第二条评论就停）。
+   */
+  function scrapeThesisFeed() {
+    const out = [];
+    let all;
+    try { all = document.body ? document.body.querySelectorAll('*') : []; } catch (_) { return out; }
+    const seenRows = [];
+    for (const el of all) {
+      let raw;
+      try { raw = el.textContent || ''; } catch (_) { continue; }
+      if (!raw || raw.length > 300 || raw.indexOf('Thesis') === -1) continue;
+      const head = oneLine(cleanText(el));
+      if (!COMMENT_HEAD_RE.test(head)) continue;
+      let innermost = true;
+      for (const c of el.children) {
+        if (COMMENT_HEAD_RE.test(oneLine(cleanText(c)))) { innermost = false; break; }
+      }
+      if (!innermost) continue;
+      // 向上爬到完整评论行：父层仍以同一个头开头、且只含这一条评论
+      let row = el;
+      for (let i = 0; i < 5 && row.parentElement; i++) {
+        const pt = oneLine(cleanText(row.parentElement));
+        if (!COMMENT_HEAD_RE.test(pt)) break;
+        if ((pt.match(COMMENT_HEAD_G) || []).length > 1) break;
+        if (pt.length > 1200) break;
+        row = row.parentElement;
+      }
+      if (seenRows.indexOf(row) !== -1) continue;
+      seenRows.push(row);
+
+      const t = oneLine(cleanText(row));
+      const m = COMMENT_HEAD_RE.exec(t);
+      if (!m) continue;
+      let rest = t.slice(m[0].length).trim();
+      let positionUsd = '';
+      const hm = /^([$][\d,.]+[KMBkmb]?)\s*/.exec(rest);
+      if (hm) { positionUsd = hm[1]; rest = rest.slice(hm[0].length); }
+      let pnl = '';
+      let pnlPos = null;
+      const pm = /^\(\s*([▲▼+\-−])\s*([\d,.]+)\s*%\s*\)\s*/.exec(rest);
+      if (pm) {
+        pnlPos = (pm[1] === '▲' || pm[1] === '+');
+        pnl = (pnlPos ? '▲' : '▼') + pm[2] + '%';
+        rest = rest.slice(pm[0].length);
+      }
+      rest = rest.replace(/\s+\d+\s+older$/i, '').trim();
+      let likes = 0;
+      let text = rest;
+      const lm = /\s(\d{1,6})$/.exec(rest);
+      if (lm) { likes = parseInt(lm[1], 10) || 0; text = rest.slice(0, lm.index).trim(); }
+      if (!text) continue;
+      out.push({
+        handle: m[1].replace(/^@/, ''), time: m[2], ageMin: relAgeMinutes(m[2]),
+        likes, positionUsd, pnl, pnlPos, text, url: safeHttps(urlsIn(text)[0] || '') || '',
+      });
+      if (out.length >= 60) break;
+    }
+    return out;
+  }
+
   function scrapeThesis() {
     const rowEls = collectHolderRows();
     if (!rowEls.length) return { rows: [], general: false };
     const col = findThesisColumn();
 
-    // v0.8：观点页行头要带作者的仓位/盈亏（fomo 同款）——同一张表按 handle 对上号，
-    // 用带护栏的整表解析，解析不出就让装饰缺席，绝不影响 thesis 正文本身。
-    const byHandle = {};
+    // v0.8：观点页行头要带作者的仓位/盈亏（fomo 同款）。
+    // v0.8.1（K3 审查修正）：对号改按"同一行 DOM"，不再按 handle 建表——无 profile 链接时
+    // handle 退化为显示名，同名持有人会张冠李戴；行身份永远不会。perCell 模式沿用整表判定
+    //（不同持有人同仓位金额 = 列抓串了），解析不出就让装饰缺席，绝不影响 thesis 正文本身。
+    let perCell = false;
     try {
-      for (const hr of parseHoldersGuarded(rowEls)) {
-        const k = String(hr.handle || '').toLowerCase();
-        if (k && !byHandle[k]) byHandle[k] = hr;
+      const flat = parseHolderRows(rowEls, false);
+      const dup = duplicatePositions(flat);
+      if (dup > 0) {
+        const cells = parseHolderRows(rowEls, true);
+        if (cells.length && duplicatePositions(cells) < dup) perCell = true;
       }
     } catch (_) { /* 装饰缺席即可 */ }
 
@@ -1848,12 +2074,14 @@ details.tweets > summary { color: #9aa0aa; }
       let p = null;
       try { p = parseHolderThesis(row, col); } catch (_) { p = null; }
       if (!p) continue;
-      const hold = byHandle[String(p.handle || '').toLowerCase()];
-      if (hold) {
-        p.positionUsd = hold.positionUsd || '';
-        p.pnl = hold.pnl || '';
-        p.pnlPos = hold.pnlPos;
-      }
+      try {
+        const hold = parseHolderRow(row, perCell);   // 同一行 → 装饰必属同一位持有人
+        if (hold) {
+          p.positionUsd = hold.positionUsd || '';
+          p.pnl = hold.pnl || '';
+          p.pnlPos = hold.pnlPos;
+        }
+      } catch (_) { /* 装饰缺席 */ }
       parsedAll.push(p);
     }
     parsedAll.sort((a, b) => (b.likes || 0) - (a.likes || 0));   // 稳定：点赞多在前，无赞保持行序
@@ -1865,7 +2093,19 @@ details.tweets > summary { color: #9aa0aa; }
       seen.push(key);
       out.push(p);
     }
-    return { rows: out, general: false };
+
+    // 发言时间：评论流在 DOM 里才配得上（作者+正文前缀双门，宁缺毋错）。
+    // 评论流只渲染最新一段，按赞榜前排的老 thesis 多半配不上——这是数据侧事实。
+    let feed = [];
+    try { feed = scrapeThesisFeed(); } catch (_) { feed = []; }
+    for (const p of out) {
+      const key = normKey(p.text).slice(0, 24);
+      if (!key) continue;
+      const hit = feed.find((c) => c.handle.toLowerCase() === String(p.handle || '').toLowerCase()
+        && normKey(c.text).indexOf(key) !== -1);
+      if (hit) p.time = hit.time;
+    }
+    return { rows: out, general: false, feed };
   }
 
   // ---------- 抓取调度：开卡即扫，表格懒加载 → 短时重扫 ----------
@@ -1880,14 +2120,50 @@ details.tweets > summary { color: #9aa0aa; }
     if (observerDebounce) { clearTimeout(observerDebounce); observerDebounce = null; }
   }
 
+  /**
+   * 页面上 "Friends only" 筛选是否开着：true / false / null（判不出）。
+   * 主人 2026-09-02：Thesis/Holders 为空时必须提示这一层，否则别人会把
+   * "筛选后没数据" 误解成 "扩展抓不到"。
+   */
+  function friendsOnlyActive() {
+    try {
+      for (const lb of document.querySelectorAll('label')) {
+        const t = (lb.textContent || '').trim();
+        if (t.length > 30 || !/friends\s*only/i.test(t)) continue;
+        const box = lb.querySelector('input[type="checkbox"]');
+        if (box) return !!box.checked;
+        const aria = lb.querySelector('[aria-checked]');
+        if (aria) return aria.getAttribute('aria-checked') === 'true';
+        return null;
+      }
+    } catch (_) { /* 判不出 */ }
+    return null;
+  }
+
+  /** 空态文案：确认开着 Friends only → 直说原因；判不出 → 带一句提醒；确认没开 → 原文案。 */
+  function emptyScrapeHint(base, friendsOnly) {
+    if (friendsOnly === true) return '页面开着 Friends only 筛选——关闭它才能显示全部数据';
+    if (friendsOnly === false) return base;
+    return base + '（若开着 Friends only 筛选，需关闭才有全量数据）';
+  }
+
+  /** 抓取结果指纹：状态+数据一致就跳过重渲染（防阅读中闪烁/滚动跳动/翻译重跑，K3 审查建议）。 */
+  function scrapeFingerprint(st) {
+    try {
+      return st.status + '|' + (st.holdersPresent ? 1 : 0)
+        + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u')
+        + '|' + JSON.stringify(st.data) + '|' + JSON.stringify(st.feed || null);
+    }
+    catch (_) { return 'nofp:' + Date.now(); }   // 指纹算不出就当变了，宁可多画一次
+  }
+
   function scanScrapers(seq, ca, chain) {
     if (seq !== state.seq) return;
+    const prevHolders = state.holders;
+    const prevThesis = state.thesis;
 
     let holders = [];
     try { holders = scrapeHolders(); } catch (_) { holders = []; }
-    state.holders = holders.length
-      ? { status: 'ready', data: holders, error: null }
-      : { status: 'empty', data: null, error: null };
 
     // v0.7.4：thesis 改读同一张 Holders 表的 "Thesis" 列。空态要分清两种情形——
     // 表压根没渲染出来（懒加载）→ 提示滚动 Holders 表；表在但没人写 thesis → 另一句话。
@@ -1895,12 +2171,27 @@ details.tweets > summary { color: #9aa0aa; }
     const holdersPresent = holders.length > 0;
     let th = { rows: [], general: false };
     try { th = scrapeThesis(); } catch (_) { th = { rows: [], general: false }; }
-    state.thesis = th.rows.length
-      ? { status: 'ready', data: th.rows, error: null, general: th.general, holdersPresent: true }
-      : { status: 'empty', data: null, error: null, general: false, holdersPresent };
 
-    renderKol();
-    renderThesis();
+    // 任一为空才需要侦测 Friends only（空态提示用；两个空态共用同一次侦测结果）
+    const friendsOnly = (holders.length && th.rows.length) ? null : friendsOnlyActive();
+
+    // 抖动保护（v0.8.2）：这轮扫空、但本币已有成品数据 → 保留旧数据不清屏。
+    // fomo 翻页/切自家 tab/虚拟滚动都可能让表暂时从 DOM 消失，不是"数据没了"。
+    state.holders = holders.length
+      ? { status: 'ready', data: holders, error: null }
+      : (prevHolders && prevHolders.status === 'ready' ? prevHolders
+        : { status: 'empty', data: null, error: null, friendsOnly });
+    const feed = (th && Array.isArray(th.feed)) ? th.feed : [];
+    state.thesis = th.rows.length
+      ? { status: 'ready', data: th.rows, error: null, general: th.general, holdersPresent: true, feed }
+      : (prevThesis && prevThesis.status === 'ready'
+        ? Object.assign({}, prevThesis, feed.length ? { feed } : null)
+        : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, feed });
+
+    const hFp = scrapeFingerprint(state.holders);
+    const tFp = scrapeFingerprint(state.thesis);
+    if (hFp !== state.scrapeFp.holders) { state.scrapeFp.holders = hFp; renderKol(); }
+    if (tFp !== state.scrapeFp.thesis) { state.scrapeFp.thesis = tFp; renderThesis(); }
   }
 
   function startScrapers(seq, ca, chain) {
@@ -2094,34 +2385,41 @@ details.tweets > summary { color: #9aa0aa; }
     }
     if (!rows.length) {
       body.appendChild(h('div', { cls: 'grey',
-        text: '把页面的 Holders 表滚动到可见即可显示持仓' }));
+        text: emptyScrapeHint('把页面的 Holders 表滚动到可见即可显示持仓', st.friendsOnly) }));
       return;
     }
 
-    // v0.7 主人定的行格式：一行三样东西，@名字 · 成本 $X · $仓位 ▲盈亏%
-    // 代币数量与持有时长按主人要求去掉——看的是成本和赚赔，不是流水账。
+    // 行格式（v0.8.8 主人定稿）：@名字 · $仓位 ▲盈亏% · 持有 2d 4h ——
+    // 成本撤出行内（挤到换行了），收进整行的悬停提示；代币数量照旧不显示。
     for (const r of rows) {
       const item = h('div', { cls: 'row-item' });
+      if (nonEmpty(r.avgEntry)) item.setAttribute('title', '成本 ' + r.avgEntry);
       const rh = h('div', { cls: 'rhead' });
       const dot = () => h('span', { cls: 'sep', text: '·' });
       // 认不出作者就整个 chip 不出现，绝不编一个"@匿名"糊弄主人
       if (nonEmpty(r.handle)) rh.appendChild(h('span', { cls: 'rauthor', text: '@' + r.handle }));
-      if (nonEmpty(r.avgEntry)) {
-        if (rh.childNodes.length) rh.appendChild(dot());
-        rh.appendChild(h('span', { cls: 'rcost', text: '成本 ' + r.avgEntry }));
-      }
       if (nonEmpty(r.positionUsd)) {
         if (rh.childNodes.length) rh.appendChild(dot());
         rh.appendChild(h('span', { cls: 'rval', text: r.positionUsd }));
       }
       if (nonEmpty(r.pnl)) {
-        rh.appendChild(h('span', {
-          cls: 'pnl ' + (r.pnlPos === false ? 'neg' : 'pos'), text: r.pnl,
-        }));
+        rh.appendChild(h('span', { cls: 'pnl' + pnlToneCls(r.pnlPos), text: r.pnl }));
+      }
+      // v0.8.4：持仓时长回归显示（主人 2026-09-02 要求；v0.7 曾按要求去掉）
+      if (nonEmpty(r.avgHold)) {
+        rh.appendChild(dot());
+        rh.appendChild(h('span', { cls: 'rtime', text: '持有 ' + r.avgHold }));
       }
       item.appendChild(rh);
       body.appendChild(item);
     }
+  }
+
+  /** 盈亏配色三分支：true 绿 / false 红 / 判不出方向不配色（不许默认当赚，K3 审查修正）。 */
+  function pnlToneCls(pnlPos) {
+    if (pnlPos === true) return ' pos';
+    if (pnlPos === false) return ' neg';
+    return '';
   }
 
   /** 抽出正文里的 https 链接（去重，保序）。 */
@@ -2246,30 +2544,64 @@ details.tweets > summary { color: #9aa0aa; }
     }
     if (!rows.length) {
       // 表在但没人写 thesis → 一句话；表压根没渲染（懒加载）→ 与持仓者同一句"滚到可见"
-      body.appendChild(h('div', { cls: 'grey', text: st.holdersPresent
+      body.appendChild(h('div', { cls: 'grey', text: emptyScrapeHint(st.holdersPresent
         ? '持有人里暂时没有写 thesis 的'
-        : '把页面的 Holders 表滚动到可见即可显示' }));
+        : '把页面的 Holders 表滚动到可见即可显示', st.friendsOnly) }));
       return;
     }
 
-    for (const row of rows.slice(0, THESIS_TAB_SHOW)) {
+    // v0.8.7 排序切换：按赞（默认）| 最新（只列 ≥2 赞且配到发言时间的，时间新→旧）
+    const sortBtn = (key, label) => h('button', {
+      cls: 'sbtn' + (state.thesisSort === key ? ' on' : ''), text: label, attrs: { type: 'button' },
+      on: { click: () => { if (state.thesisSort !== key) { state.thesisSort = key; renderThesis(); } } },
+    });
+    body.appendChild(h('div', { cls: 'sortrow' },
+      [sortBtn('likes', '按赞'), sortBtn('time', '最新 ≥2赞')]));
+
+    // 最新档（v0.8.9 重做）：数据源直接换成 fomo 自家评论流——它天生带时间/正文/点赞/持仓，
+    // 且"最新"本来就该看它；按赞档继续用 Holders 表全量。评论流只渲染最新一段，没开过
+    // 那个 tab 就是空的，占位说明白。
+    let shown = rows;
+    if (state.thesisSort === 'time') {
+      const feed = Array.isArray(st.feed) ? st.feed : [];
+      shown = feed
+        .filter((r) => (r.likes || 0) >= 2 && r.ageMin !== null)
+        .slice()
+        .sort((a, b) => a.ageMin - b.ageMin);
+      if (!shown.length) {
+        body.appendChild(h('div', { cls: 'grey',
+          text: feed.length
+            ? '评论流里暂时没有 ≥2 赞的发言'
+            : '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看' }));
+        rescanNow();   // 主人多半刚开完评论页切回来，顺手补扫一次
+        return;
+      }
+    }
+
+    for (const row of shown.slice(0, THESIS_TAB_SHOW)) {
       const item = h('div', { cls: 'row-item' });
       const rh = h('div', { cls: 'rhead' });
       if (nonEmpty(row.handle)) rh.appendChild(h('span', { cls: 'rauthor', text: '@' + row.handle }));
       if (row.likes) rh.appendChild(h('span', { cls: 'rlikes', text: '♥ ' + row.likes }));
+      // 发言时间：评论流对上号才有（见 scrapeThesisTimes），配不上就不显示
+      if (nonEmpty(row.time)) rh.appendChild(h('span', { cls: 'rtime', text: row.time }));
       // fomo 观点流同款：作者旁给这位持有人的仓位与盈亏（同表解析，解析不出就不占位）
       if (nonEmpty(row.positionUsd) || nonEmpty(row.pnl)) {
         rh.appendChild(h('span', { cls: 'spacer' }));
         if (nonEmpty(row.positionUsd)) rh.appendChild(h('span', { cls: 'rval', text: row.positionUsd }));
         if (nonEmpty(row.pnl)) {
-          rh.appendChild(h('span', {
-            cls: 'pnl ' + (row.pnlPos === false ? 'neg' : 'pos'), text: row.pnl,
-          }));
+          rh.appendChild(h('span', { cls: 'pnl' + pnlToneCls(row.pnlPos), text: row.pnl }));
         }
       }
       item.appendChild(rh);
       item.appendChild(textBlock(row.text, true, THESIS_CLAMP));
       body.appendChild(item);
+    }
+    // 角标报的是真实条数；超上限时明说截断了，不许"看着像全量"
+    if (shown.length > THESIS_TAB_SHOW) {
+      body.appendChild(h('div', { cls: 'muted',
+        text: (state.thesisSort === 'time' ? '只显示最新的前 ' : '只显示点赞最高的前 ')
+          + THESIS_TAB_SHOW + ' 条（共 ' + shown.length + ' 条）' }));
     }
     refreshLangBtn();
     translation.autoEnable();
