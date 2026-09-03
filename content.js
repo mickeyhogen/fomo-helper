@@ -83,6 +83,7 @@
       scrollHolders: '把页面的 Holders 表滚动到可见即可显示持仓', scrollTable: '把页面的 Holders 表滚动到可见即可显示',
       noThesis: '持有人里暂时没有写 thesis 的',
       friendsOn: '页面开着 Friends only 筛选——关闭它才能显示全部数据', friendsMaybe: '（若开着 Friends only 筛选，需关闭才有全量数据）',
+      bottomTab: '把 fomo 下方面板切到「Holders」标签才有数据（现在停在别的标签）', diag: '诊断', diagTitle: '生成一段排查信息并复制，发给作者即可', diagCopied: '诊断信息已复制', diagShown: '诊断信息见下方',
       feedNoLikes: '评论流里暂时没有 ≥2 赞的发言', feedMissing: '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看',
       capNewest: '只显示最新的前 ', capLikes: '只显示点赞最高的前 ', capTail: ' 条（共 ', capEnd: ' 条）',
       cost: '成本 ', held: '持有 ', more: ' 展开', less: ' 收起',
@@ -112,6 +113,7 @@
       scrollHolders: 'Scroll the Holders table into view to load positions', scrollTable: 'Scroll the Holders table into view to load',
       noThesis: 'No holder has written a thesis yet',
       friendsOn: '“Friends only” is on — turn it off to see everyone', friendsMaybe: ' (if “Friends only” is on, turn it off for the full list)',
+      bottomTab: 'Switch fomo’s bottom panel to the “Holders” tab (it’s on another tab now)', diag: 'Diagnose', diagTitle: 'Build a short report and copy it — paste it to the author', diagCopied: 'Diagnostic copied', diagShown: 'Diagnostic shown below',
       feedNoLikes: 'No thesis with ≥2 likes in the feed yet', feedMissing: 'Newest reads fomo’s own Thesis feed — open that tab once so it renders, then come back',
       capNewest: 'Showing the newest ', capLikes: 'Showing the top ', capTail: ' (of ', capEnd: ')',
       cost: 'cost ', held: 'held ', more: ' more', less: ' less',
@@ -518,6 +520,13 @@
 .grip::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px;
                border-right: 2px solid #6a6e76; border-bottom: 2px solid #6a6e76; border-radius: 0 0 2px 0; }
 .grip:hover, .card.resizing .grip { opacity: 1; }
+/* v0.9.4 诊断：空态下一个不起眼的小字按钮，点开一小块等宽报告 */
+.diag-btn { display: inline-block; margin: 6px 0 0; padding: 0; background: none; border: none;
+            color: #4a4d54; font-size: 11px; cursor: pointer; text-decoration: underline dotted; }
+.diag-btn:hover { color: #9aa0aa; }
+.diag { margin: 6px 0 0; padding: 6px 8px; background: #0c0d0f; border: 1px solid #1e2024; border-radius: 6px;
+        color: #8a8f99; font-size: 10.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-all;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: text; }
 .card.resizing { user-select: none; }
 .byfoot a { color: #6a6e76; text-decoration: none; }
 .byfoot a:hover { color: #9aa0aa; text-decoration: underline; }
@@ -972,6 +981,79 @@ details.tweets > summary { color: #9aa0aa; }
     try { chrome.storage.local.remove(['cardPos', 'cardSize']); } catch (_) { /* 忽略 */ }
     applySize();   // 内部会调 applyPos，位置与尺寸一起归位
     toast(tr('docked'));
+  }
+
+  // ---------- 诊断（v0.9.4：远程排查用，空态时才出现） ----------
+  function buildDiag() {
+    const d = {};
+    try { d.ver = chrome.runtime.getManifest().version; } catch (_) { d.ver = '?'; }
+    d.page = location.pathname;
+    d.token = urlToken ? (urlToken.chain + '/' + String(urlToken.ca).slice(0, 8) + '…') : 'none';
+    d.viewport = window.innerWidth + 'x' + window.innerHeight;
+    let bodyText = '';
+    try { bodyText = document.body ? (document.body.innerText || '') : ''; } catch (_) {}
+    d.pageText = bodyText.length;
+    d.holdAnchors = (bodyText.match(/avg\.?\s*hold/gi) || []).length;
+    try { d.holderRows = collectHolderRows().length; } catch (_) { d.holderRows = -1; }
+    try { d.thesisCol = !!findThesisColumn(); } catch (_) { d.thesisCol = null; }
+    d.bottomTab = fomoBottomTab();
+    d.friendsOnly = friendsOnlyActive();
+    d.holders = state.holders && state.holders.status;
+    d.thesis = state.thesis && state.thesis.status;
+    d.lastScan = lastScanAt ? Math.round((Date.now() - lastScanAt) / 1000) + 's' : 'never';
+    d.observer = scrapeObserver ? 'on' : 'off';
+    d.lang = settings.lang;
+    d.ua = (navigator.userAgent.match(/(Chrome|Edg|Brave)\/[\d.]+/) || [''])[0];
+    return d;
+  }
+
+  function diagText(d) {
+    return [
+      'Fomo放大镜 diag v' + d.ver,
+      'page=' + d.page + ' token=' + d.token + ' vp=' + d.viewport + ' ua=' + d.ua + ' lang=' + d.lang,
+      'text=' + d.pageText + ' holdAnchors=' + d.holdAnchors
+        + ' holderRows=' + d.holderRows + ' thesisCol=' + d.thesisCol,
+      'bottomTab=' + d.bottomTab + ' friendsOnly=' + d.friendsOnly
+        + ' holders=' + d.holders + ' thesis=' + d.thesis + ' lastScan=' + d.lastScan + ' observer=' + d.observer,
+    ].join('\n');
+  }
+
+  function diagButton() {
+    return h('button', {
+      cls: 'diag-btn', text: tr('diag'), attrs: { type: 'button' }, title: tr('diagTitle'),
+      on: { click: (e) => { e.stopPropagation(); showDiag(e.currentTarget); } },
+    });
+  }
+
+  function showDiag(btn) {
+    const d = buildDiag();
+    const text = diagText(d);
+    const parent = btn && btn.parentElement;
+    if (parent) {
+      const old = parent.querySelector('.diag');
+      if (old) old.remove();
+      const box = h('pre', { cls: 'diag', text: text });
+      parent.insertBefore(box, btn.nextSibling);
+    }
+    try {
+      navigator.clipboard.writeText(text).then(() => toast(tr('diagCopied')), () => toast(tr('diagShown')));
+    } catch (_) { toast(tr('diagShown')); }
+  }
+
+  /**
+   * 滚动救援（v0.9.4）：观察者 25s 后撤了，用户这时才把 Holders 表滚出来 → 没人重扫。
+   * 空态期间监听一下滚动（捕获阶段，fomo 的滚动容器不是 window），节流 1.5s。
+   */
+  let lastScrollRescan = 0;
+  function onScrollMaybeRescan() {
+    if (!state.open || !state.ca) return;
+    const hEmpty = state.holders && state.holders.status === 'empty';
+    const tEmpty = state.thesis && state.thesis.status === 'empty';
+    if (!hEmpty && !tEmpty) return;
+    const now = Date.now();
+    if (now - lastScrollRescan < 1500) return;
+    lastScrollRescan = now;
+    rescanNow(true);
   }
 
   // ---------- 交互 ----------
@@ -2290,6 +2372,7 @@ details.tweets > summary { color: #9aa0aa; }
 
   // ---------- 抓取调度：开卡即扫，表格懒加载 → 短时重扫 ----------
   let scrapeObserver = null;
+  let lastScanAt = 0;        // 上次扫表时间（诊断用）
   let scrapeTimers = [];
   let observerDebounce = null;
 
@@ -2305,24 +2388,98 @@ details.tweets > summary { color: #9aa0aa; }
    * 主人 2026-09-02：Thesis/Holders 为空时必须提示这一层，否则别人会把
    * "筛选后没数据" 误解成 "扩展抓不到"。
    */
+  /**
+   * fomo 的 Friends only 开关（v0.9.4 按真页面 DOM 重写）：
+   * 真页面不是 checkbox，是 <button> 里一个 SVG，勾选态靠颜色变量区分——
+   *   勾选：style="color: var(--color-accent-primary)"，SVG path 以 "M2 5.2" 开头（实心勾框）
+   *   未勾：style="color: var(--color-text-tertiary)"，SVG path 以 "M10.8 2H5.2" 开头（空框）
+   * 页面上有两个 Friends only：图表叠加层那个（<label> 包）和 Holders 表右上那个（<div> 包，
+   * 旁边有 "Thesis only"）。决定 Holders 表内容的是后者，优先取它；找不到再退回文档序最后一个。
+   * 老的 checkbox / aria-checked 路径保留，兜别的变体。判不出返回 null。
+   */
+  function friendsOnlyControl() {
+    let cands = [];
+    try {
+      for (const el of document.querySelectorAll('label, div, span')) {
+        let t;
+        try { t = (el.textContent || '').trim(); } catch (_) { continue; }
+        if (t.length > 20 || !/^friends\s*only$/i.test(t)) continue;
+        // 取最内层文本恰好是 "Friends only" 的容器（再往里就是纯文本/图标了）
+        let innermost = true;
+        for (const c of el.children) {
+          const ct = (c.textContent || '').trim();
+          if (/^friends\s*only$/i.test(ct) && c.children.length) { innermost = false; break; }
+        }
+        if (innermost) cands.push(el);
+      }
+    } catch (_) { return null; }
+    if (!cands.length) return null;
+    // Holders 表那个：紧邻的兄弟节点里有一个文本恰好是 "Thesis only"
+    //（不能看父容器 textContent——顶层 label 的父级是整页，谁都"含有" Thesis only）
+    for (const el of cands) {
+      const par = el.parentElement;
+      if (!par) continue;
+      for (const c of par.children) {
+        if (c === el) continue;
+        let ct;
+        try { ct = (c.textContent || '').trim(); } catch (_) { continue; }
+        if (/^thesis\s*only$/i.test(ct)) return el;
+      }
+    }
+    return cands[cands.length - 1];
+  }
+
   function friendsOnlyActive() {
     try {
-      for (const lb of document.querySelectorAll('label')) {
-        const t = (lb.textContent || '').trim();
-        if (t.length > 30 || !/friends\s*only/i.test(t)) continue;
-        const box = lb.querySelector('input[type="checkbox"]');
-        if (box) return !!box.checked;
-        const aria = lb.querySelector('[aria-checked]');
-        if (aria) return aria.getAttribute('aria-checked') === 'true';
-        return null;
-      }
+      const el = friendsOnlyControl();
+      if (!el) return null;
+      const box = el.querySelector('input[type="checkbox"]');
+      if (box) return !!box.checked;
+      const aria = el.querySelector('[aria-checked]');
+      if (aria) return aria.getAttribute('aria-checked') === 'true';
+      const btn = el.querySelector('button, [role="checkbox"], svg');
+      const style = ((btn && btn.getAttribute && btn.getAttribute('style')) || el.getAttribute('style') || '').toLowerCase();
+      if (/accent-primary|accent|primary/.test(style)) return true;
+      if (/text-tertiary|tertiary|muted/.test(style)) return false;
+      const path = el.querySelector('svg path');
+      const d = (path && path.getAttribute('d')) || '';
+      if (/^M2\s+5\.2/.test(d)) return true;
+      if (/^M10\.8\s+2H5\.2/.test(d)) return false;
     } catch (_) { /* 判不出 */ }
     return null;
   }
 
+  /**
+   * fomo 底部面板当前停在哪个标签（Holders / Swaps / Thesis）。
+   * 真页面：三个 button 文案 "Holders (21.5K)" / "Swaps" / "Thesis (1,039)"，
+   * 当前项 class 含 text-text-primary，其余 text-text-tertiary。判不出返回 null。
+   */
+  function fomoBottomTab() {
+    try {
+      let active = null;
+      let seen = 0;
+      for (const b of document.querySelectorAll('button, [role="tab"]')) {
+        const t = (b.textContent || '').trim();
+        if (t.length > 25) continue;
+        let key = null;
+        if (/^Holders\b/.test(t)) key = 'holders';
+        else if (/^Swaps\b/.test(t)) key = 'swaps';
+        else if (/^Thesis\s*\(/.test(t) || t === 'Thesis') key = 'thesis';
+        if (!key) continue;
+        seen++;
+        const cls = String(b.className || '');
+        const selected = /text-text-primary/.test(cls) || b.getAttribute('aria-selected') === 'true'
+          || b.getAttribute('data-state') === 'active';
+        if (selected) active = key;
+      }
+      return seen >= 2 ? active : null;   // 三个标签至少见到两个才算认出了这排面板
+    } catch (_) { return null; }
+  }
+
   /** 空态文案：确认开着 Friends only → 直说原因；判不出 → 带一句提醒；确认没开 → 原文案。 */
-  function emptyScrapeHint(base, friendsOnly) {
+  function emptyScrapeHint(base, friendsOnly, bottomTab) {
     if (friendsOnly === true) return tr('friendsOn');
+    if (bottomTab && bottomTab !== 'holders') return tr('bottomTab');   // v0.9.4：表被 Swaps/Thesis 标签顶掉了
     if (friendsOnly === false) return base;
     return base + tr('friendsMaybe');
   }
@@ -2331,7 +2488,7 @@ details.tweets > summary { color: #9aa0aa; }
   function scrapeFingerprint(st) {
     try {
       return st.status + '|' + (st.holdersPresent ? 1 : 0)
-        + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u')
+        + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u') + '|' + (st.bottomTab || '-')
         + '|' + JSON.stringify(st.data) + '|' + JSON.stringify(st.feed || null);
     }
     catch (_) { return 'nofp:' + Date.now(); }   // 指纹算不出就当变了，宁可多画一次
@@ -2355,21 +2512,24 @@ details.tweets > summary { color: #9aa0aa; }
     let th = { rows: [], general: false };
     try { th = scrapeThesis(rowEls); } catch (_) { th = { rows: [], general: false }; }
 
-    // 任一为空才需要侦测 Friends only（空态提示用；两个空态共用同一次侦测结果）
-    const friendsOnly = (holders.length && th.rows.length) ? null : friendsOnlyActive();
+    // 任一为空才需要侦测 Friends only / 底部标签（空态提示用；两个空态共用同一次侦测结果）
+    const anyEmpty = !(holders.length && th.rows.length);
+    const friendsOnly = anyEmpty ? friendsOnlyActive() : null;
+    const bottomTab = anyEmpty ? fomoBottomTab() : null;
+    lastScanAt = Date.now();
 
     // 抖动保护（v0.8.2）：这轮扫空、但本币已有成品数据 → 保留旧数据不清屏。
     // fomo 翻页/切自家 tab/虚拟滚动都可能让表暂时从 DOM 消失，不是"数据没了"。
     state.holders = holders.length
       ? { status: 'ready', data: holders, error: null }
       : (prevHolders && prevHolders.status === 'ready' ? prevHolders
-        : { status: 'empty', data: null, error: null, friendsOnly });
+        : { status: 'empty', data: null, error: null, friendsOnly, bottomTab });
     const feed = (th && Array.isArray(th.feed)) ? th.feed : [];
     state.thesis = th.rows.length
       ? { status: 'ready', data: th.rows, error: null, general: th.general, holdersPresent: true, feed }
       : (prevThesis && prevThesis.status === 'ready'
         ? Object.assign({}, prevThesis, feed.length ? { feed } : null)
-        : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, feed });
+        : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, bottomTab, feed });
 
     if (state.holders.status === 'ready' && state.thesis.status === 'ready' && feed.length) stopScrapers();
 
@@ -2570,7 +2730,8 @@ details.tweets > summary { color: #9aa0aa; }
     }
     if (!rows.length) {
       body.appendChild(h('div', { cls: 'grey',
-        text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly) }));
+        text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly, st.bottomTab) }));
+      body.appendChild(diagButton());
       return;
     }
 
@@ -2731,7 +2892,8 @@ details.tweets > summary { color: #9aa0aa; }
       // 表在但没人写 thesis → 一句话；表压根没渲染（懒加载）→ 与持仓者同一句"滚到可见"
       body.appendChild(h('div', { cls: 'grey', text: emptyScrapeHint(st.holdersPresent
         ? tr('noThesis')
-        : tr('scrollTable'), st.friendsOnly) }));
+        : tr('scrollTable'), st.friendsOnly, st.bottomTab) }));
+      if (!st.holdersPresent) body.appendChild(diagButton());
       return;
     }
 
@@ -3156,6 +3318,7 @@ details.tweets > summary { color: #9aa0aa; }
     document.addEventListener('mouseout', onMouseOut, true);
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('click', onDocClick, true);
+    document.addEventListener('scroll', onScrollMaybeRescan, { capture: true, passive: true });
     window.addEventListener('resize', applyPos);
     ensureUi();
   }
@@ -3164,6 +3327,8 @@ details.tweets > summary { color: #9aa0aa; }
     globalThis.__fomoDebotTestHandle = {
       get shadow() { return shadow; },
       get host() { return host; },
+      diag() { return buildDiag(); },
+      stopScrapers() { stopScrapers(); },   // 模拟 25s 观察者过期
       get state() {
         return {
           open: state.open, ca: state.ca, mode: state.mode,

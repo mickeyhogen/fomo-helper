@@ -196,7 +196,8 @@ function chromeShim(fx) {
   let bgListener = null;
   window.chrome = {
     runtime: {
-      id: 'test-extension-id',   // v0.9：后台校验 sender.id === runtime.id
+      id: 'test-extension-id',
+      getManifest: () => ({ version: fx.version || '0.0.0' }),   // v0.9.4 诊断报告读版本   // v0.9：后台校验 sender.id === runtime.id
       lastError: undefined,
       onMessage: { addListener(fn) { bgListener = fn; } },
       sendMessage(msg, cb) {
@@ -410,7 +411,8 @@ async function openPage(over, baseOverride) {
   const p = await browser.newPage();
   await p.setViewport({ width: 1280, height: 900 });
   p.on('pageerror', (e) => { console.log('   [page error]', e.message); failures++; });
-  await p.evaluateOnNewDocument(chromeShim, Object.assign(SHIM_BASE(), over || {}));
+  await p.evaluateOnNewDocument(chromeShim, Object.assign(SHIM_BASE(),
+    { version: JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8')).version }, over || {}));
   await p.goto(`${baseOverride || BASE}/mock-fomo.html`, { waitUntil: 'domcontentloaded' });
   await p.addScriptTag({ content: BG_SRC });
   await p.addScriptTag({ content: CT_SRC });
@@ -1068,8 +1070,11 @@ try {
   // --- 21f (v0.8.3) Friends only 开着且抓不到 → 空态明说原因（主人指令：别让人误解）---
   {
     await page.evaluate(() => {
-      const box = document.getElementById('friends-toggle');
-      if (box) box.checked = true;
+      // v0.9.4：Holders 区那个才是决定表内容的开关（真页面 = button + 颜色变量，无 checkbox）
+      const b = document.getElementById('friends-real-btn');
+      if (b) b.setAttribute('style', 'color: var(--color-accent-primary); width: 16px; height: 16px;');
+      const pth = document.getElementById('friends-real-path');
+      if (pth) pth.setAttribute('d', 'M2 5.2C2 4.0799 2 3.51984 2.21799 3.09202');
       const h = document.getElementById('holders');
       if (h) { window.__friendsHolders = h; h.remove(); }
     });
@@ -1077,8 +1082,10 @@ try {
     await sleep(1300);
     const fOn = await snap(page);
     await page.evaluate(() => {
-      const box = document.getElementById('friends-toggle');
-      if (box) box.checked = false;
+      const b = document.getElementById('friends-real-btn');
+      if (b) b.setAttribute('style', 'color: var(--color-text-tertiary); width: 16px; height: 16px;');
+      const pth = document.getElementById('friends-real-path');
+      if (pth) pth.setAttribute('d', 'M10.8 2H5.2C4.0799 2 3.5 2 3.09 2.21');
       const m = document.querySelector('main');
       if (window.__friendsHolders && m) m.appendChild(window.__friendsHolders);
     });
@@ -1091,6 +1098,92 @@ try {
     ]);
   }
 
+  // --- 21g (v0.9.4) fomo 底部面板停在 Swaps/Thesis → 表被顶掉，空态直说"切到 Holders" ---
+  {
+    await page.evaluate(() => {
+      document.getElementById('tab-holders').className = 'text-text-tertiary';
+      document.getElementById('tab-thesis').className = 'text-text-primary';
+      const h = document.getElementById('holders');
+      if (h) { window.__tabHolders = h; h.remove(); }
+    });
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);   // 换币才会重扫（同币 pushState 保上一次好的）
+    await sleep(1300);
+    const onThesis = await snap(page);
+    const diagOnThesis = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
+    await page.evaluate(() => {
+      document.getElementById('tab-holders').className = 'text-text-primary';
+      document.getElementById('tab-thesis').className = 'text-text-tertiary';
+      const m = document.querySelector('main');
+      if (window.__tabHolders && m) m.appendChild(window.__tabHolders);
+    });
+    await sleep(1100);
+    const back = await snap(page);
+    step('步骤 21g · 底部面板停在 Thesis 标签 → 空态提示"切到 Holders"，切回即恢复', [
+      chk('Holders 空态点名底部标签', onThesis.kolText.includes('切到「Holders」'), onThesis.kolText.slice(0, 60)),
+      chk('Thesis 空态同样点名', onThesis.thesisText.includes('切到「Holders」'), onThesis.thesisText.slice(0, 60)),
+      chk('不再冒出 Friends only 猜测句', !onThesis.kolText.includes('若开着 Friends only'), onThesis.kolText.slice(0, 80)),
+      chk('diag 认出 bottomTab=thesis', diagOnThesis.bottomTab === 'thesis', diagOnThesis.bottomTab),
+      chk('diag 认出 friendsOnly=false（真形状开关）', diagOnThesis.friendsOnly === false, diagOnThesis.friendsOnly),
+      chk('切回 Holders + 表回来 → 数据恢复', back.kolRows === 6 && back.thesisRows === 3, [back.kolRows, back.thesisRows]),
+    ]);
+  }
+
+  // --- 21h (v0.9.4) 空态有「诊断」按钮；点开出报告并含关键字段 ---
+  {
+    await page.evaluate(() => {
+      const h = document.getElementById('holders');
+      if (h) { window.__diagHolders = h; h.remove(); }
+    });
+    await pushState(page, `/tokens/robinhood/${SLOW_CA}`);   // 上一步在 PONS，这里换回 SLOW 触发重扫
+    await sleep(1300);
+    const hasBtn = await page.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const b = sh.querySelector('.slot-kol .diag-btn') || sh.querySelector('.diag-btn');
+      if (!b) return { btn: false };
+      b.click();
+      const box = sh.querySelector('.diag');
+      return { btn: true, text: box ? box.textContent : '' };
+    });
+    const d = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
+    await page.evaluate(() => {
+      const m = document.querySelector('main');
+      if (window.__diagHolders && m) m.appendChild(window.__diagHolders);
+    });
+    await sleep(1100);
+    step('步骤 21h · 空态「诊断」按钮：点开出报告，字段齐全', [
+      chk('空态下有诊断按钮', hasBtn.btn === true, hasBtn),
+      chk('报告含版本/视口/锚点/底部标签/Friends only', /diag v0\.9\.\d/.test(hasBtn.text) && /vp=\d+x\d+/.test(hasBtn.text)
+        && /holdAnchors=\d+/.test(hasBtn.text) && /bottomTab=/.test(hasBtn.text) && /friendsOnly=/.test(hasBtn.text), String(hasBtn.text || '').slice(0, 200)),
+      chk('表移除时 holderRows=0（底部标签的 "Holders (N)" 不算表）', d.holderRows === 0, d.holderRows),
+      chk('thesisCol=false（列头随表一起没了）', d.thesisCol === false, d.thesisCol),
+    ]);
+  }
+
+  // --- 21i (v0.9.4) 滚动救援：观察者已撤（模拟 25s 过期）后表才出现 → 一次滚动即重扫 ---
+  {
+    await page.evaluate(() => {
+      const h = document.getElementById('holders');
+      if (h) { window.__scrollHolders = h; h.remove(); }
+    });
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);   // 再换币，拿干净空态
+    await sleep(1300);
+    await page.evaluate(() => window.__fomoDebotTestHandle.stopScrapers());   // 模拟 25s 后观察者撤场
+    await page.evaluate(() => {
+      const m = document.querySelector('main');
+      if (window.__scrollHolders && m) m.appendChild(window.__scrollHolders);
+    });
+    await sleep(900);
+    const stillEmpty = await snap(page);   // 观察者没了，不该自动补上
+    await page.evaluate(() => document.dispatchEvent(new Event('scroll', { bubbles: true })));
+    await sleep(1200);
+    const afterScroll = await snap(page);
+    step('步骤 21i · 观察者撤场后表才渲染 → 滚动一下即重扫补上', [
+      chk('撤场后表回来也不自动补（证明观察者确实停了）', stillEmpty.kolRows === 0, stillEmpty.kolRows),
+      chk('滚动后 Holders 补上', afterScroll.kolRows === 6, afterScroll.kolRows),
+      chk('滚动后 Thesis 补上', afterScroll.thesisRows === 3, afterScroll.thesisRows),
+    ]);
+  }
+
   // --- 21c 慢页面：卡片必须等 fomo 渲染完再出场，不许弹在一片黑上 ---
   //（主人截图里的第一个症状：卡片比 fomo 自己的 React 还快，背景全黑、两段全灰字）
   {
@@ -1099,11 +1192,16 @@ try {
       const h = document.getElementById('holders');
       if (p) { window.__slowPanel = p; p.remove(); }
       if (h) { window.__slowHolders = h; h.remove(); }
+      // v0.9.4 mock 多了底部标签/筛选行——"没渲染完"的页面同样不该有它们
+      const bt = document.getElementById('bottom-tabs'); if (bt) { window.__slowTabs = bt; bt.remove(); }
+      const hf = document.getElementById('holders-filters'); if (hf) { window.__slowFilters = hf; hf.remove(); }
       return (document.body.innerText || '').length;   // 证明正文确实低于就绪阈值
     });
     const restore = () => page.evaluate(() => {
       const m = document.querySelector('main');
       if (window.__slowPanel) document.body.appendChild(window.__slowPanel);
+      if (window.__slowTabs && m) m.appendChild(window.__slowTabs);
+      if (window.__slowFilters && m) m.appendChild(window.__slowFilters);
       if (window.__slowHolders && m) m.appendChild(window.__slowHolders);
     });
     const closeCard = () => page.evaluate(() => {
@@ -1849,7 +1947,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.3', mf.version === '0.9.3', mf.version),
+    chk('版本号为 0.9.4', mf.version === '0.9.4', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
