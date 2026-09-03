@@ -83,7 +83,8 @@
       scrollHolders: '把页面的 Holders 表滚动到可见即可显示持仓', scrollTable: '把页面的 Holders 表滚动到可见即可显示',
       noThesis: '持有人里暂时没有写 thesis 的',
       friendsOn: '页面开着 Friends only 筛选——关闭它才能显示全部数据', friendsMaybe: '（若开着 Friends only 筛选，需关闭才有全量数据）',
-      bottomTab: '把 fomo 下方面板切到「Holders」标签才有数据（现在停在别的标签）', diag: '诊断', diagTitle: '生成一段排查信息并复制，发给作者即可', diagCopied: '诊断信息已复制', diagShown: '诊断信息见下方',
+      bottomTab: '把 fomo 下方面板切到「Holders」标签才有数据（现在停在别的标签）',
+      translated: '页面被浏览器翻译了（Chrome 网页翻译会改掉表格文字）——点地址栏翻译图标选「显示原文」，再刷新', diag: '诊断', diagTitle: '生成一段排查信息并复制，发给作者即可', diagCopied: '诊断信息已复制', diagShown: '诊断信息见下方',
       feedNoLikes: '评论流里暂时没有 ≥2 赞的发言', feedMissing: '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看',
       capNewest: '只显示最新的前 ', capLikes: '只显示点赞最高的前 ', capTail: ' 条（共 ', capEnd: ' 条）',
       cost: '成本 ', held: '持有 ', more: ' 展开', less: ' 收起',
@@ -113,7 +114,8 @@
       scrollHolders: 'Scroll the Holders table into view to load positions', scrollTable: 'Scroll the Holders table into view to load',
       noThesis: 'No holder has written a thesis yet',
       friendsOn: '“Friends only” is on — turn it off to see everyone', friendsMaybe: ' (if “Friends only” is on, turn it off for the full list)',
-      bottomTab: 'Switch fomo’s bottom panel to the “Holders” tab (it’s on another tab now)', diag: 'Diagnose', diagTitle: 'Build a short report and copy it — paste it to the author', diagCopied: 'Diagnostic copied', diagShown: 'Diagnostic shown below',
+      bottomTab: 'Switch fomo’s bottom panel to the “Holders” tab (it’s on another tab now)',
+      translated: 'This page is being translated by the browser, which rewrites the table text — choose “Show original” in the address-bar translate icon, then refresh', diag: 'Diagnose', diagTitle: 'Build a short report and copy it — paste it to the author', diagCopied: 'Diagnostic copied', diagShown: 'Diagnostic shown below',
       feedNoLikes: 'No thesis with ≥2 likes in the feed yet', feedMissing: 'Newest reads fomo’s own Thesis feed — open that tab once so it renders, then come back',
       capNewest: 'Showing the newest ', capLikes: 'Showing the top ', capTail: ' (of ', capEnd: ')',
       cost: 'cost ', held: 'held ', more: ' more', less: ' less',
@@ -358,12 +360,12 @@
     } catch (_) { if (cb) cb(); }
     try {
       chrome.storage.local.get({ cardPos: null, cardSize: null, translatorReady: false }, (v) => {
-        if (v && v.cardSize && typeof v.cardSize.w === 'number') {
-          savedSize = v.cardSize;
+        if (v && v.cardSize && validSize(v.cardSize)) {   // K3 #8：NaN/负数/天文数字一律当没存过
+          savedSize = { w: v.cardSize.w, h: v.cardSize.h };
           if (card) applySize();
         }
-        if (v && v.cardPos && typeof v.cardPos.left === 'number') {
-          savedPos = v.cardPos;
+        if (v && v.cardPos && Number.isFinite(v.cardPos.left) && Number.isFinite(v.cardPos.top)) {   // Gickey D4
+          savedPos = { left: v.cardPos.left, top: v.cardPos.top };
           if (card) applyPos();
         }
         // 语言包此前下过 → 以后不必再点"译"，自动开。
@@ -877,7 +879,7 @@ details.tweets > summary { color: #9aa0aa; }
       card.style.top = top + 'px';
       card.style.right = 'auto';
       // 给下方 Holders 表留出空间。用户自定过尺寸时不再压高度——那是他自己拉的（v0.9.3）
-      if (savedSize && typeof savedSize.h === 'number') {
+      if (validSize(savedSize)) {
         card.style.maxHeight = 'none';
       } else {
         const room = Math.max(160, window.innerHeight - top - DOCK_BOTTOM_RESERVE);
@@ -923,11 +925,22 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   /** 把记住的尺寸贴回卡片；没记过就还原成默认（宽度靠 CSS，高度交回 applyPos 的上限逻辑）。 */
+  function validSize(sz) {
+    return !!sz && Number.isFinite(sz.w) && Number.isFinite(sz.h)
+      && sz.w >= RESIZE_MIN_W && sz.h >= RESIZE_MIN_H && sz.w <= 4000 && sz.h <= 4000;
+  }
+
   function applySize() {
     if (!card) return;
-    if (savedSize && typeof savedSize.w === 'number') {
-      card.style.width = savedSize.w + 'px';
-      card.style.height = savedSize.h + 'px';
+    if (validSize(savedSize)) {
+      // K3 #7：换了小屏幕/缩了窗口，记住的尺寸要钳在视口内，否则手柄跑到屏幕外没法拉回来
+      const rect = card.getBoundingClientRect();
+      const left = Number.isFinite(rect.left) ? rect.left : 0;
+      const top = Number.isFinite(rect.top) ? rect.top : 0;
+      const w = Math.max(RESIZE_MIN_W, Math.min(savedSize.w, window.innerWidth - left - 8));
+      const h = Math.max(RESIZE_MIN_H, Math.min(savedSize.h, window.innerHeight - top - 8));
+      card.style.width = w + 'px';
+      card.style.height = h + 'px';
     } else {
       card.style.width = '';
       card.style.height = '';
@@ -962,11 +975,13 @@ details.tweets > summary { color: #9aa0aa; }
     const up = () => {
       window.removeEventListener('mousemove', move, true);
       window.removeEventListener('mouseup', up, true);
+      window.removeEventListener('blur', up);
       card.classList.remove('resizing');
       try { chrome.storage.local.set({ cardSize: savedSize }); } catch (_) { /* 忽略 */ }
     };
     window.addEventListener('mousemove', move, true);
     window.addEventListener('mouseup', up, true);
+    window.addEventListener('blur', up, { once: true });   // K3 #11：拖出浏览器窗口松手收不到 mouseup
   }
 
   function onHeaderDblClick(e) {
@@ -987,7 +1002,8 @@ details.tweets > summary { color: #9aa0aa; }
   function buildDiag() {
     const d = {};
     try { d.ver = chrome.runtime.getManifest().version; } catch (_) { d.ver = '?'; }
-    d.page = location.pathname;
+    // Gickey D6：page 只给路由模板；完整 CA 不进报告（token 字段已截断）
+    d.page = location.pathname.replace(/0x[0-9a-fA-F]{6,}|[1-9A-HJ-NP-Za-km-z]{28,}/g, '…');
     d.token = urlToken ? (urlToken.chain + '/' + String(urlToken.ca).slice(0, 8) + '…') : 'none';
     d.viewport = window.innerWidth + 'x' + window.innerHeight;
     let bodyText = '';
@@ -998,6 +1014,14 @@ details.tweets > summary { color: #9aa0aa; }
     try { d.thesisCol = !!findThesisColumn(); } catch (_) { d.thesisCol = null; }
     d.bottomTab = fomoBottomTab();
     d.friendsOnly = friendsOnlyActive();
+    d.translated = pageTranslated();
+    d.htmlClass = String(document.documentElement.className || '').slice(0, 40) || '-';
+    d.cjk = (bodyText.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+    // 表区附近 100 字样本：锚点全没时，看一眼就知道文案变成了什么语言
+    try {
+      const i = bodyText.search(/Holders|Traders|Trader|Position|持有|持仓|保有/);
+      d.sample = (i >= 0 ? bodyText.slice(i, i + 100) : bodyText.slice(0, 100)).replace(/\s+/g, ' ');
+    } catch (_) { d.sample = ''; }
     d.holders = state.holders && state.holders.status;
     d.thesis = state.thesis && state.thesis.status;
     d.lastScan = lastScanAt ? Math.round((Date.now() - lastScanAt) / 1000) + 's' : 'never';
@@ -1013,8 +1037,10 @@ details.tweets > summary { color: #9aa0aa; }
       'page=' + d.page + ' token=' + d.token + ' vp=' + d.viewport + ' ua=' + d.ua + ' lang=' + d.lang,
       'text=' + d.pageText + ' holdAnchors=' + d.holdAnchors
         + ' holderRows=' + d.holderRows + ' thesisCol=' + d.thesisCol,
-      'bottomTab=' + d.bottomTab + ' friendsOnly=' + d.friendsOnly
-        + ' holders=' + d.holders + ' thesis=' + d.thesis + ' lastScan=' + d.lastScan + ' observer=' + d.observer,
+      'bottomTab=' + d.bottomTab + ' friendsOnly=' + d.friendsOnly + ' translated=' + d.translated
+        + ' html=' + d.htmlClass + ' cjk=' + d.cjk,
+      'holders=' + d.holders + ' thesis=' + d.thesis + ' lastScan=' + d.lastScan + ' observer=' + d.observer,
+      'sample=' + d.sample,
     ].join('\n');
   }
 
@@ -1044,17 +1070,27 @@ details.tweets > summary { color: #9aa0aa; }
    * 滚动救援（v0.9.4）：观察者 25s 后撤了，用户这时才把 Holders 表滚出来 → 没人重扫。
    * 空态期间监听一下滚动（捕获阶段，fomo 的滚动容器不是 window），节流 1.5s。
    */
-  let lastScrollRescan = 0;
   function onScrollMaybeRescan() {
     if (!state.open || !state.ca) return;
     const hEmpty = state.holders && state.holders.status === 'empty';
     const tEmpty = state.thesis && state.thesis.status === 'empty';
     if (!hEmpty && !tEmpty) return;
-    const now = Date.now();
-    if (now - lastScrollRescan < 1500) return;
-    lastScrollRescan = now;
-    rescanNow(true);
+    // K3 #4：这些空态是"稳定且正确"的，再扫也不会变——别每 1.5s 全页走一遍
+    const st = state.thesis || {};
+    if (st.holdersPresent === true) return;                 // 表在、只是没人写 thesis
+    if (st.friendsOnly === true || (state.holders && state.holders.friendsOnly === true)) return;
+    if (st.bottomTab && st.bottomTab !== 'holders') return; // 表被别的标签顶掉，滚动救不了（点标签走 #3）
+    // Gickey D2：观察器还活着就交给它（DOM 一变它会扫）；只有它退场后才由滚动兜底，
+    // 且只做一次单扫（trailing debounce 600ms），不重启整套 watcher——否则 25s 退场被无限顺延。
+    if (scrapeObserver) return;
+    if (scrollRescanTimer) clearTimeout(scrollRescanTimer);
+    scrollRescanTimer = setTimeout(() => {
+      scrollRescanTimer = null;
+      if (!state.open || !state.ca) return;
+      try { scanScrapers(state.seq, state.ca, state.chain); } catch (_) { /* 忽略 */ }
+    }, 600);
   }
+  let scrollRescanTimer = null;
 
   // ---------- 交互 ----------
   function copyCa() {
@@ -2398,35 +2434,51 @@ details.tweets > summary { color: #9aa0aa; }
    * 老的 checkbox / aria-checked 路径保留，兜别的变体。判不出返回 null。
    */
   function friendsOnlyControl() {
-    let cands = [];
+    // K3 #5：不再对全页 label/div/span 逐个读 textContent（O(页面)），改走文本节点 TreeWalker（O(文本节点)）
+    let carriers = [];
     try {
-      for (const el of document.querySelectorAll('label, div, span')) {
-        let t;
-        try { t = (el.textContent || '').trim(); } catch (_) { continue; }
-        if (t.length > 20 || !/^friends\s*only$/i.test(t)) continue;
-        // 取最内层文本恰好是 "Friends only" 的容器（再往里就是纯文本/图标了）
-        let innermost = true;
-        for (const c of el.children) {
-          const ct = (c.textContent || '').trim();
-          if (/^friends\s*only$/i.test(ct) && c.children.length) { innermost = false; break; }
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (/^\s*friends\s*only\s*$/i.test(n.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+      });
+      let n;
+      while ((n = walker.nextNode())) {
+        let el = n.parentElement;
+        // 文本可能被 <font>/<span> 包一层：上溯到第一个"自己文本恰好是 Friends only 且含状态控件"的容器，最多 3 层
+        let pick = null;
+        for (let i = 0; i < 3 && el && el !== document.body; i++) {
+          const t = (el.textContent || '').trim();
+          if (!/^friends\s*only$/i.test(t)) break;
+          if (hasStateControl(el)) { pick = el; break; }
+          el = el.parentElement;
         }
-        if (innermost) cands.push(el);
+        if (pick && carriers.indexOf(pick) === -1) carriers.push(pick);
       }
     } catch (_) { return null; }
-    if (!cands.length) return null;
-    // Holders 表那个：紧邻的兄弟节点里有一个文本恰好是 "Thesis only"
-    //（不能看父容器 textContent——顶层 label 的父级是整页，谁都"含有" Thesis only）
-    for (const el of cands) {
-      const par = el.parentElement;
-      if (!par) continue;
-      for (const c of par.children) {
-        if (c === el) continue;
-        let ct;
-        try { ct = (c.textContent || '').trim(); } catch (_) { continue; }
-        if (/^thesis\s*only$/i.test(ct)) return el;
+    if (!carriers.length) return null;
+    // Gickey D3：响应式页面常有隐藏副本，可见的优先
+    const visible = carriers.filter((c) => { try { return c.getClientRects().length > 0; } catch (_) { return true; } });
+    if (visible.length) carriers = visible;
+    // Holders 表那个：自己或 ≤3 层祖先的兄弟里有一个文本恰为 "Thesis only"（K3 #1：不再只看直接兄弟）
+    for (const c of carriers) {
+      let el = c;
+      for (let i = 0; i < 3 && el && el.parentElement && el.parentElement !== document.body; i++) {
+        for (const sib of el.parentElement.children) {
+          if (sib === el) continue;
+          let st;
+          try { st = (sib.textContent || '').trim(); } catch (_) { continue; }
+          if (/^thesis\s*only$/i.test(st)) return c;
+        }
+        el = el.parentElement;
       }
     }
-    return cands[cands.length - 1];
+    return carriers[carriers.length - 1];
+  }
+
+  /** 载体里有没有能读出勾选态的东西（checkbox / aria-checked / 带 inline style 的按钮 / svg path）。 */
+  function hasStateControl(el) {
+    try {
+      return !!el.querySelector('input[type="checkbox"], [aria-checked], button[style], svg path');
+    } catch (_) { return false; }
   }
 
   function friendsOnlyActive() {
@@ -2437,10 +2489,12 @@ details.tweets > summary { color: #9aa0aa; }
       if (box) return !!box.checked;
       const aria = el.querySelector('[aria-checked]');
       if (aria) return aria.getAttribute('aria-checked') === 'true';
-      const btn = el.querySelector('button, [role="checkbox"], svg');
-      const style = ((btn && btn.getAttribute && btn.getAttribute('style')) || el.getAttribute('style') || '').toLowerCase();
-      if (/accent-primary|accent|primary/.test(style)) return true;
-      if (/text-tertiary|tertiary|muted/.test(style)) return false;
+      // K3 #2/#10：只认精确 token、先判 off——`--color-text-primary` 这种也含 "primary"，裸匹配会把关判成开。
+      // 只读按钮自己的 inline style，不拿外层容器的颜色顶包；认不出宁可返回 null（退回通用提示）。
+      const btn = el.querySelector('button[style], [role="checkbox"][style]');
+      const style = ((btn && btn.getAttribute('style')) || '').toLowerCase();
+      if (/--color-text-tertiary\b/.test(style)) return false;
+      if (/--color-accent-primary\b/.test(style)) return true;
       const path = el.querySelector('svg path');
       const d = (path && path.getAttribute('d')) || '';
       if (/^M2\s+5\.2/.test(d)) return true;
@@ -2454,10 +2508,24 @@ details.tweets > summary { color: #9aa0aa; }
    * 真页面：三个 button 文案 "Holders (21.5K)" / "Swaps" / "Thesis (1,039)"，
    * 当前项 class 含 text-text-primary，其余 text-text-tertiary。判不出返回 null。
    */
+  /**
+   * 页面是否被浏览器翻译过（v0.9.5，主人朋友 scar：整页翻成中文后所有英文锚点同时消失）。
+   * Chrome 翻译的两处稳定签名：<html class="translated-ltr|translated-rtl">；文本节点被包进
+   * <font style="vertical-align: inherit;">。任一命中即判 true。
+   */
+  function pageTranslated() {
+    try {
+      const cls = String(document.documentElement.className || '');
+      if (/\btranslated-(ltr|rtl)\b/.test(cls)) return true;
+      if (document.querySelector('font[style*="vertical-align: inherit"]')) return true;
+    } catch (_) { /* 判不出当没翻译 */ }
+    return false;
+  }
+
   function fomoBottomTab() {
     try {
-      let active = null;
-      let seen = 0;
+      // 候选：文案像 Holders / Swaps / Thesis 的按钮
+      const cands = [];
       for (const b of document.querySelectorAll('button, [role="tab"]')) {
         const t = (b.textContent || '').trim();
         if (t.length > 25) continue;
@@ -2465,21 +2533,45 @@ details.tweets > summary { color: #9aa0aa; }
         if (/^Holders\b/.test(t)) key = 'holders';
         else if (/^Swaps\b/.test(t)) key = 'swaps';
         else if (/^Thesis\s*\(/.test(t) || t === 'Thesis') key = 'thesis';
-        if (!key) continue;
-        seen++;
-        const cls = String(b.className || '');
-        const selected = /text-text-primary/.test(cls) || b.getAttribute('aria-selected') === 'true'
-          || b.getAttribute('data-state') === 'active';
-        if (selected) active = key;
+        if (key) cands.push({ key, b });
       }
-      return seen >= 2 ? active : null;   // 三个标签至少见到两个才算认出了这排面板
+      if (cands.length < 2) return null;
+      // K3 #6 / Gickey D3：只评估"同一排"的那组。真页面每个 tab 可能各裹一层 div，
+      // 所以不是按直接父节点分组，而是找 ≤4 层内最近的、能罩住 ≥2 个不同 key 的祖先当 tablist。
+      let best = null;   // { root, members }
+      for (const c of cands) {
+        let a = c.b.parentElement;
+        for (let i = 0; i < 4 && a && a !== document.body; i++) {
+          const members = cands.filter((x) => a.contains(x.b));
+          const keys = new Set(members.map((x) => x.key));
+          if (keys.size >= 2 && members.length <= 12) {
+            if (!best || keys.size > new Set(best.members.map((x) => x.key)).size
+              || (keys.size === new Set(best.members.map((x) => x.key)).size && best.root.contains(a) && a !== best.root)) {
+              best = { root: a, members };
+            }
+            break;
+          }
+          a = a.parentElement;
+        }
+      }
+      if (!best) return null;
+      // 用 classList 精确 token（`hover:text-text-primary` 不算）；必须唯一，两个都像 active → 判不出
+      const actives = [];
+      for (const { key, b } of best.members) {
+        let on = false;
+        try { on = b.classList.contains('text-text-primary'); } catch (_) { on = false; }
+        if (on || b.getAttribute('aria-selected') === 'true' || b.getAttribute('data-state') === 'active') actives.push(key);
+      }
+      const uniq = Array.from(new Set(actives));
+      return uniq.length === 1 ? uniq[0] : null;
     } catch (_) { return null; }
   }
 
   /** 空态文案：确认开着 Friends only → 直说原因；判不出 → 带一句提醒；确认没开 → 原文案。 */
-  function emptyScrapeHint(base, friendsOnly, bottomTab) {
+  function emptyScrapeHint(base, friendsOnly, bottomTab, translated) {
+    if (translated) return tr('translated');   // v0.9.5：翻译把锚点全换掉了，其余判定都不可信
+    if (bottomTab && bottomTab !== 'holders') return tr('bottomTab');   // 表被 Swaps/Thesis 顶掉：先切回来（Gickey D3 顺序）
     if (friendsOnly === true) return tr('friendsOn');
-    if (bottomTab && bottomTab !== 'holders') return tr('bottomTab');   // v0.9.4：表被 Swaps/Thesis 标签顶掉了
     if (friendsOnly === false) return base;
     return base + tr('friendsMaybe');
   }
@@ -2488,7 +2580,7 @@ details.tweets > summary { color: #9aa0aa; }
   function scrapeFingerprint(st) {
     try {
       return st.status + '|' + (st.holdersPresent ? 1 : 0)
-        + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u') + '|' + (st.bottomTab || '-')
+        + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u') + '|' + (st.bottomTab || '-') + (st.translated ? '|T' : '')
         + '|' + JSON.stringify(st.data) + '|' + JSON.stringify(st.feed || null);
     }
     catch (_) { return 'nofp:' + Date.now(); }   // 指纹算不出就当变了，宁可多画一次
@@ -2516,6 +2608,7 @@ details.tweets > summary { color: #9aa0aa; }
     const anyEmpty = !(holders.length && th.rows.length);
     const friendsOnly = anyEmpty ? friendsOnlyActive() : null;
     const bottomTab = anyEmpty ? fomoBottomTab() : null;
+    const translated = anyEmpty ? pageTranslated() : false;
     lastScanAt = Date.now();
 
     // 抖动保护（v0.8.2）：这轮扫空、但本币已有成品数据 → 保留旧数据不清屏。
@@ -2523,13 +2616,13 @@ details.tweets > summary { color: #9aa0aa; }
     state.holders = holders.length
       ? { status: 'ready', data: holders, error: null }
       : (prevHolders && prevHolders.status === 'ready' ? prevHolders
-        : { status: 'empty', data: null, error: null, friendsOnly, bottomTab });
+        : { status: 'empty', data: null, error: null, friendsOnly, bottomTab, translated });
     const feed = (th && Array.isArray(th.feed)) ? th.feed : [];
     state.thesis = th.rows.length
       ? { status: 'ready', data: th.rows, error: null, general: th.general, holdersPresent: true, feed }
       : (prevThesis && prevThesis.status === 'ready'
         ? Object.assign({}, prevThesis, feed.length ? { feed } : null)
-        : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, bottomTab, feed });
+        : { status: 'empty', data: null, error: null, general: false, holdersPresent, friendsOnly, bottomTab, translated, feed });
 
     if (state.holders.status === 'ready' && state.thesis.status === 'ready' && feed.length) stopScrapers();
 
@@ -2730,7 +2823,7 @@ details.tweets > summary { color: #9aa0aa; }
     }
     if (!rows.length) {
       body.appendChild(h('div', { cls: 'grey',
-        text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly, st.bottomTab) }));
+        text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly, st.bottomTab, st.translated) }));
       body.appendChild(diagButton());
       return;
     }
@@ -2892,8 +2985,8 @@ details.tweets > summary { color: #9aa0aa; }
       // 表在但没人写 thesis → 一句话；表压根没渲染（懒加载）→ 与持仓者同一句"滚到可见"
       body.appendChild(h('div', { cls: 'grey', text: emptyScrapeHint(st.holdersPresent
         ? tr('noThesis')
-        : tr('scrollTable'), st.friendsOnly, st.bottomTab) }));
-      if (!st.holdersPresent) body.appendChild(diagButton());
+        : tr('scrollTable'), st.friendsOnly, st.bottomTab, st.translated) }));
+      body.appendChild(diagButton());   // K3 #12："没人写 thesis" 也是用户会来报的状态
       return;
     }
 
@@ -3271,9 +3364,23 @@ details.tweets > summary { color: #9aa0aa; }
       // v0.9.1：点的是页面上的控件（Friends only 勾选框、筛选/排序按钮、外链…）= 用户在操作
       // fomo，不是在"点卡外关卡"。主人实测：点 Holders 表上方的 Friends only 卡片直接消失。
       // 只有点空白/图表这类非交互区才算主动关卡。
-      if (isPageControl(t)) return;
+      if (isPageControl(t)) {
+        // K3 #3：用户很可能刚点了 fomo 的 Holders 标签 / Friends only 开关来"修"空态——观察者可能早撤了，
+        // 400ms 后补扫一次，别让"切到 Holders"这句在表已经出来后还挂着。
+        scheduleControlRescan();
+        return;
+      }
     } catch (_) { /* 解析失败就按"外部点击"处理 */ }
     closeCard();
+  }
+
+  let controlRescanTimer = null;
+  function scheduleControlRescan() {
+    const hEmpty = state.holders && state.holders.status === 'empty';
+    const tEmpty = state.thesis && state.thesis.status === 'empty';
+    if (!hEmpty && !tEmpty) return;
+    if (controlRescanTimer) clearTimeout(controlRescanTimer);
+    controlRescanTimer = setTimeout(() => { controlRescanTimer = null; rescanNow(true); }, 400);
   }
 
   /**
@@ -3285,6 +3392,7 @@ details.tweets > summary { color: #9aa0aa; }
     + '[role="option"], [role="radio"], [contenteditable="true"]';
   function isPageControl(t) {
     if (!t || !t.closest) return false;
+    if (t.isContentEditable) return true;   // Gickey D5：contenteditable="" / plaintext-only 不在 selector 里
     if (t.closest(CONTROL_SEL)) return true;
     let el = t;
     for (let i = 0; i < 4 && el && el.nodeType === 1 && el !== document.body; i++) {
@@ -3319,7 +3427,7 @@ details.tweets > summary { color: #9aa0aa; }
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('click', onDocClick, true);
     document.addEventListener('scroll', onScrollMaybeRescan, { capture: true, passive: true });
-    window.addEventListener('resize', applyPos);
+    window.addEventListener('resize', applySize);
     ensureUi();
   }
 

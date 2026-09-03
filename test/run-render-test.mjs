@@ -1101,8 +1101,8 @@ try {
   // --- 21g (v0.9.4) fomo 底部面板停在 Swaps/Thesis → 表被顶掉，空态直说"切到 Holders" ---
   {
     await page.evaluate(() => {
-      document.getElementById('tab-holders').className = 'text-text-tertiary';
-      document.getElementById('tab-thesis').className = 'text-text-primary';
+      document.getElementById('btab-holders').className = 'text-text-tertiary';
+      document.getElementById('btab-thesis').className = 'text-text-primary';
       const h = document.getElementById('holders');
       if (h) { window.__tabHolders = h; h.remove(); }
     });
@@ -1111,8 +1111,8 @@ try {
     const onThesis = await snap(page);
     const diagOnThesis = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
     await page.evaluate(() => {
-      document.getElementById('tab-holders').className = 'text-text-primary';
-      document.getElementById('tab-thesis').className = 'text-text-tertiary';
+      document.getElementById('btab-holders').className = 'text-text-primary';
+      document.getElementById('btab-thesis').className = 'text-text-tertiary';
       const m = document.querySelector('main');
       if (window.__tabHolders && m) m.appendChild(window.__tabHolders);
     });
@@ -1181,6 +1181,115 @@ try {
       chk('撤场后表回来也不自动补（证明观察者确实停了）', stillEmpty.kolRows === 0, stillEmpty.kolRows),
       chk('滚动后 Holders 补上', afterScroll.kolRows === 6, afterScroll.kolRows),
       chk('滚动后 Thesis 补上', afterScroll.thesisRows === 3, afterScroll.thesisRows),
+    ]);
+  }
+
+  // --- 21j (v0.9.5) 页面被 Chrome 翻译：锚点全换成中文 → 空态直说"显示原文再刷新"，diag translated=true ---
+  {
+    await page.evaluate(() => {
+      document.documentElement.classList.add('translated-ltr');
+      // Chrome 翻译的真实形态：文本节点被 <font style="vertical-align: inherit;"> 包住并改成译文
+      const walker = document.createTreeWalker(document.getElementById('holders'), NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      window.__trSaved = [];
+      for (const n of nodes) {
+        if (!/avg\. hold|Trader|Position|PnL|Avg\. entry|Thesis|Holders/.test(n.nodeValue)) continue;
+        window.__trSaved.push([n, n.nodeValue]);
+        const f = document.createElement('font'); f.setAttribute('style', 'vertical-align: inherit;');
+        f.textContent = n.nodeValue.replace(/avg\. hold/g, '平均持有').replace(/Trader/g, '交易者').replace(/Position/g, '仓位')
+          .replace(/PnL/g, '盈亏').replace(/Avg\. entry/g, '平均入场').replace(/Thesis/g, '论点').replace(/Holders/g, '持有者');
+        n.parentNode.replaceChild(f, n); window.__trSaved[window.__trSaved.length - 1].push(f);
+      }
+    });
+    await pushState(page, `/tokens/robinhood/${SLOW_CA}`);   // 上一步在 PONS，换币重扫
+    await sleep(1300);
+    const tr = await snap(page);
+    const dTr = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
+    await page.evaluate(() => {
+      document.documentElement.classList.remove('translated-ltr');
+      for (const [n, v, f] of window.__trSaved) { try { f.parentNode.replaceChild(n, f); n.nodeValue = v; } catch (_) {} }
+    });
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1300);
+    const back = await snap(page);
+    step('步骤 21j · 页面被浏览器翻译 → 空态点名"显示原文"，diag 标 translated', [
+      chk('翻译后锚点消失、两页为空', tr.kolRows === 0 && tr.thesisRows === 0, [tr.kolRows, tr.thesisRows]),
+      chk('Holders 空态点名浏览器翻译', tr.kolText.includes('被浏览器翻译'), tr.kolText.slice(0, 60)),
+      chk('Thesis 空态同样点名', tr.thesisText.includes('被浏览器翻译'), tr.thesisText.slice(0, 60)),
+      chk('diag translated=true 且 cjk>0', dTr.translated === true && dTr.cjk > 0, [dTr.translated, dTr.cjk]),
+      chk('恢复原文后数据回来', back.kolRows === 6 && back.thesisRows === 3, [back.kolRows, back.thesisRows]),
+    ]);
+  }
+
+  // --- 21k (K3 #3) 观察者撤场后，用户点 fomo 的 Holders 标签把表点回来 → 400ms 内补扫 ---
+  {
+    await page.evaluate(() => {
+      const h = document.getElementById('holders');
+      if (h) { window.__ctlHolders = h; h.remove(); }
+      document.getElementById('btab-holders').className = 'text-text-tertiary';
+      document.getElementById('btab-swaps').className = 'text-text-primary';
+    });
+    await pushState(page, `/tokens/robinhood/${SLOW_CA}`);
+    await sleep(1300);
+    const onSwaps = await snap(page);
+    await page.evaluate(() => window.__fomoDebotTestHandle.stopScrapers());   // 模拟 25s 过期
+    // 用户点 Holders 标签：fomo 把表渲染回来（真鼠标点在卡片外的控件上）
+    await page.evaluate(() => {
+      document.getElementById('btab-holders').addEventListener('click', () => {
+        document.getElementById('btab-holders').className = 'text-text-primary';
+        document.getElementById('btab-swaps').className = 'text-text-tertiary';
+        const m = document.querySelector('main');
+        if (window.__ctlHolders && m) m.appendChild(window.__ctlHolders);
+      }, { once: true });
+    });
+    await page.click('#btab-holders');
+    await sleep(1000);
+    const afterClick = await snap(page);
+    step('步骤 21k · 观察者撤场后点 fomo 的 Holders 标签 → 卡片不关且 400ms 内补扫', [
+      chk('之前空态提示切标签', onSwaps.kolText.includes('切到「Holders」'), onSwaps.kolText.slice(0, 50)),
+      chk('点标签后卡片仍在', afterClick.visible === true, afterClick.visible),
+      chk('Holders 补上', afterClick.kolRows === 6, afterClick.kolRows),
+      chk('Thesis 补上', afterClick.thesisRows === 3, afterClick.thesisRows),
+    ]);
+  }
+
+  // --- 21l (K3 #4) 稳定空态（表在、没人写 thesis）不该被滚动反复重扫 ---
+  {
+    await page.evaluate(() => {
+      // 把表里的 thesis 单元格清空 → 表在、thesis 为空、holdersPresent=true
+      window.__thCells = [];
+      for (const c of document.querySelectorAll('#holders .hthesis, #holders .hcell.thesis, #holders [data-thesis]')) { window.__thCells.push([c, c.textContent]); c.textContent = ''; }
+    });
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1300);
+    const stable = await snap(page);
+    const t0 = await page.evaluate(() => window.__fomoDebotTestHandle.diag().lastScan);
+    await sleep(1700);
+    await page.evaluate(() => document.dispatchEvent(new Event('scroll', { bubbles: true })));
+    await sleep(300);
+    const d1 = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
+    await page.evaluate(() => { for (const [c, v] of window.__thCells) c.textContent = v; });
+    step('步骤 21l · 表在但没人写 thesis = 稳定空态 → 滚动不触发重扫', [
+      chk('夹具成立：Holders 有、Thesis 空', stable.kolRows === 6 && stable.thesisRows === 0, [stable.kolRows, stable.thesisRows]),
+      chk('滚动后 lastScan 没被刷新为 0s', d1.lastScan !== '0s', d1.lastScan),
+    ]);
+  }
+
+  // --- 21m (K3 #7/#8) 存的尺寸 NaN/超大 → 忽略或钳到视口内 ---
+  {
+    const pBig = await openPage({ localSeed: { cardSize: { w: 5000, h: 5000 } } });
+    await pushState(pBig, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const big = await pBig.evaluate(() => { const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect(); return { w: Math.round(c.width), h: Math.round(c.height), right: Math.round(c.right), bottom: Math.round(c.bottom), vw: innerWidth, vh: innerHeight }; });
+    await pBig.close();
+    const pNan = await openPage({ localSeed: { cardSize: { w: NaN, h: -3 } } });
+    await pushState(pNan, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const nan = await pNan.evaluate(() => { const c = window.__fomoDebotTestHandle.shadow.querySelector('.card'); const r = c.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), maxH: c.style.maxHeight }; });
+    await pNan.close();
+    step('步骤 21m · 记住的尺寸超大/NaN → 钳到视口内 / 当没存过', [
+      chk('5000x5000 被钳在视口内', big.right <= big.vw && big.bottom <= big.vh, big),
+      chk('NaN 尺寸被忽略：走默认宽度且 maxHeight 仍受管', nan.w === 360 && nan.maxH !== 'none', nan),
     ]);
   }
 
@@ -1947,7 +2056,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.4', mf.version === '0.9.4', mf.version),
+    chk('版本号为 0.9.5', mf.version === '0.9.5', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',

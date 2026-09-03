@@ -77,6 +77,7 @@ No app store — load the source folder directly, one minute. Works in Chrome / 
 
 - **Installed, but nothing shows up** — it only runs on `fomo.family`. Refresh the fomo page first; if still nothing, check it's enabled in `chrome://extensions`, hit ↻, and come back. When auto-open is off, the `🔍` button at the bottom-right of a token page opens the card.
 - **Thesis / Holders are empty, or show less than the page** — check whether fomo's **Friends only** filter is on. These tabs read what the page has rendered; with the filter on the table only holds friends, so that's all the extension can see. Switch the filter back to all; the empty state says so when it detects this.
+- **Thesis / Holders stay empty while the browser is translating the page** — page translation rewrites the English text in fomo's table, so the extension can't recognise it. Address-bar translate icon → "Show original" (or "Never translate this site") → refresh. The empty state says so when it detects this.
 - **Thesis / Holders show a grey "scroll the Holders table into view"** — fomo's table is lazy-loaded. Once it renders, the card fills itself within 25 s; scrolling the table into view triggers it immediately. Grey text isn't an error.
 - **No post times in *Newest*** — the *Newest* mode reads fomo's thesis feed; open that tab once.
 - **"No narrative" for this token** — DeBot has no record for it. That's the data. Thesis / Holders are unaffected.
