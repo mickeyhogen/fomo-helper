@@ -68,6 +68,7 @@
   const I18N = {
     zh: {
       copyCa: '复制合约地址', pin: '固定卡片', langBtn: '切换译文语言', refresh: '重新抓取', close: '关闭',
+      dragHint: '拖动移动卡片；双击回到默认停靠位', docked: '已回到默认位置',
       preview: '预览', launcher: 'Fomo放大镜：查看当前代币的叙事/观点/持仓', copied: '已复制',
       notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
       source: '↗ 来源', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
@@ -95,6 +96,7 @@
     },
     en: {
       copyCa: 'Copy contract address', pin: 'Pin card', langBtn: 'Switch language', refresh: 'Refresh', close: 'Close',
+      dragHint: 'Drag to move; double-click to snap back to the default dock', docked: 'Back to default position',
       preview: 'preview', launcher: 'Fomo Helper: narrative / theses / holders of this token', copied: 'Copied',
       notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
       source: '↗ source', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
@@ -680,6 +682,9 @@ details.tweets > summary { color: #9aa0aa; }
     starRow.hidden = true;
     const hdr = h('div', { cls: 'hdr' }, [hdrTop, starRow]);
     hdr.addEventListener('mousedown', onDragStart);
+    // v0.9.2：拖过的位置会持久化（cardPos），主人实测卡片"跑到 K 线图中间"就是拖过一次之后回不来——
+    // 双击头部空白处清掉记忆位置、回到默认停靠。
+    hdr.addEventListener('dblclick', onHeaderDblClick);
 
     // v0.8：顶部标签栏（跟 fomo 自家的 tab 一个用法）。
     // 叙事（默认）= DeBot 叙事 + AI 判断 + 来源推文；观点 = 持有人 thesis（按点赞排）；
@@ -720,9 +725,6 @@ details.tweets > summary { color: #9aa0aa; }
       h('span', { text: 'By ' }),
       h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
         attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo放大镜 · Fomo Helper — by @0xHogen' } }),
-      h('span', { text: ' · ' }),
-      h('a', { text: 'GitHub', href: 'https://github.com/mickeyhogen/fomo-helper',
-        attrs: { target: '_blank', rel: 'noopener noreferrer', title: '源码 / 反馈 · Source / Issues' } }),
     ]);
     card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot]);
     card.hidden = true;
@@ -888,6 +890,19 @@ details.tweets > summary { color: #9aa0aa; }
     e.preventDefault();
   }
 
+  function onHeaderDblClick(e) {
+    if (e.target && e.target.closest && e.target.closest('button, a')) return;
+    resetDock();
+  }
+
+  /** 清掉拖动记忆，回到默认停靠位（storage 里的 cardPos 一并删除）。 */
+  function resetDock() {
+    savedPos = null;
+    try { chrome.storage.local.remove('cardPos'); } catch (_) { /* 忽略 */ }
+    applyPos();
+    toast(tr('docked'));
+  }
+
   // ---------- 交互 ----------
   function copyCa() {
     if (!state.ca) return;
@@ -926,6 +941,7 @@ details.tweets > summary { color: #9aa0aa; }
     els.langBtn.setAttribute('title', tr('langBtn'));
     els.refreshBtn.setAttribute('title', tr('refresh'));
     els.closeBtn.setAttribute('title', tr('close'));
+    els.hdr.setAttribute('title', tr('dragHint'));
     els.langBusy.textContent = tr('trBusy');
     els.pvChip.textContent = tr('preview');
     if (launcher) launcher.setAttribute('title', tr('launcher'));

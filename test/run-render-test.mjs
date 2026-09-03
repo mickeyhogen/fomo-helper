@@ -1328,6 +1328,50 @@ try {
       chk('卡片重新可见', afterLauncher.visible === true, afterLauncher.visible),
       chk('回到当前 URL 的代币', (afterLauncher.state.ca || '').toLowerCase() === PONS_CA, afterLauncher.state.ca),
     ]);
+
+    // --- 24c-1 (v0.9.2) 拖过的位置会记住；双击头部回到默认停靠位并清掉记忆 ---
+    {
+      const dock = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { left: Math.round(c.left), top: Math.round(c.top) };
+      });
+      const hdr = await page.evaluate(() => {
+        const r = window.__fomoDebotTestHandle.shadow.querySelector('.hdr').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + 6 };
+      });
+      await page.mouse.move(hdr.x, hdr.y);
+      await page.mouse.down();
+      await page.mouse.move(hdr.x + 300, hdr.y + 120, { steps: 6 });
+      await page.mouse.up();
+      await sleep(200);
+      const dragged = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { left: Math.round(c.left), top: Math.round(c.top) };
+      });
+      const stored = await page.evaluate(() => new Promise((res) => chrome.storage.local.get({ cardPos: null }, (v) => res(v.cardPos))));
+      // 双击落在头部左侧的名字上（span，不是按钮），别点到右侧按钮组
+      const nm = await page.evaluate(() => {
+        const r = window.__fomoDebotTestHandle.shadow.querySelector('.name').getBoundingClientRect();
+        return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2 };
+      });
+      // 双击头部（名字 span）。closed shadow 内 puppeteer 合成 dblclick 不稳，用真实 dblclick 事件派发。
+      await page.evaluate(() => {
+        const n = window.__fomoDebotTestHandle.shadow.querySelector('.name');
+        n.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, composed: true }));
+      });
+      await sleep(250);
+      const back = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { left: Math.round(c.left), top: Math.round(c.top) };
+      });
+      const cleared = await page.evaluate(() => new Promise((res) => chrome.storage.local.get({ cardPos: null }, (v) => res(v.cardPos))));
+      step('步骤 24c-1 · 拖动位置持久化；双击头部回默认停靠并清记忆', [
+        chk('拖动后位置变了', dragged.left !== dock.left || dragged.top !== dock.top, [dock, dragged]),
+        chk('拖动位置写入了 cardPos', !!stored && typeof stored.left === 'number', stored),
+        chk('双击后回到停靠位', back.left === dock.left && back.top === dock.top, [dock, back]),
+        chk('cardPos 已清除', cleared === null, cleared),
+      ]);
+    }
   }
 
   // --- 24d/e/f/g/h/i 中文翻译各路径（各起一个独立页面，Translator 状态不可复用）。
@@ -1753,7 +1797,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.1', mf.version === '0.9.1', mf.version),
+    chk('版本号为 0.9.2', mf.version === '0.9.2', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
