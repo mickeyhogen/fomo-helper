@@ -1413,6 +1413,7 @@ try {
       const c = sh.querySelector('.card');
       return { opacity: c.style.opacity, n: ranges.length };
     });
+    await sleep(400);   // v0.9.8：落盘攒 200ms 才写（拖滑块一次几十个 input），等过防抖窗再读
     const stored = await pD.evaluate(() => new Promise((r) => chrome.storage.local.get({ displayOpacity: null }, (v) => r(v.displayOpacity))));
     await pD.close();
     step('步骤 21o · 亮度/透明度应用到卡片并持久化', [
@@ -1451,27 +1452,37 @@ try {
     ]);
   }
 
-  // --- 21n (v0.9.6) fomo 界面切中文/日文：所有锚点换成译文（词表来自 fomo 语言包）→ 照常抓到 ---
-  for (const [loc, dict] of [
-    ['zh', { hold: '平均持仓 2天4小时', Trader: '交易者', Position: '持仓', PnL: '盈亏', 'Avg. entry': '平均买入价', Thesis: '观点', 'Holders (128)': '持有者 (128)', Swaps: '交易', 'Thesis (4,933)': '观点 (255)', 'Friends only': '仅看好友', 'Thesis only': '仅看观点', Alerts: '通知', 'Market cap': '市值' }],
-    ['ja', { hold: '平均保有 22時間4分', Trader: 'トレーダー', Position: 'ポジション', PnL: '損益', 'Avg. entry': '平均買値', Thesis: '考察', 'Holders (128)': '保有者 (128)', Swaps: '取引', 'Thesis (4,933)': '考察 (255)', 'Friends only': '友達のみ', 'Thesis only': '考察のみ', Alerts: '通知', 'Market cap': '時価総額' }],
-  ]) {
-    await page.evaluate((dict) => {
+  // --- 21n (v0.9.6) fomo 界面切别的语言：所有锚点换成译文（词表来自 fomo 语言包）→ 照常抓到 ---
+  // v0.9.8：补 de/fr。之前只测 zh/ja，恰好绕开了"词首 Ø / 词尾 . "那类锚点——
+  // 德法两语其实从 v0.9.5 起就是瞎的，测试全绿。holdRe = 该语言下持仓时长应该长什么样。
+  for (const [i, [loc, dict, holdRe]] of [
+    ['zh', { hold: '平均持仓 2天4小时', Trader: '交易者', Position: '持仓', PnL: '盈亏', 'Avg. entry': '平均买入价', Thesis: '观点', 'Holders (128)': '持有者 (128)', Swaps: '交易', 'Thesis (4,933)': '观点 (255)', 'Friends only': '仅看好友', 'Thesis only': '仅看观点', Alerts: '通知', 'Market cap': '市值' }, /(持有|held)\s*2天4小时/],
+    ['ja', { hold: '平均保有 22時間4分', Trader: 'トレーダー', Position: 'ポジション', PnL: '損益', 'Avg. entry': '平均買値', Thesis: '考察', 'Holders (128)': '保有者 (128)', Swaps: '取引', 'Thesis (4,933)': '考察 (255)', 'Friends only': '友達のみ', 'Thesis only': '考察のみ', Alerts: '通知', 'Market cap': '時価総額' }, /(持有|held)\s*22時間4分/],
+    ['de', { hold: 'Ø Haltedauer 2 Tage 4 Std.', Trader: 'Trader', Position: 'Positionen', PnL: 'PnL', 'Avg. entry': 'Ø Einstieg', Thesis: 'These', 'Holders (128)': 'Halter (128)', Swaps: 'Swaps', 'Thesis (4,933)': 'These (255)', 'Friends only': 'Nur Freunde', 'Thesis only': 'Nur Thesen', Alerts: 'Alerts', 'Market cap': 'Marktkap.' }, /(持有|held)\s*2\s*Tage\s*4\s*Std/],
+    ['fr', { hold: 'Détention moy. 22h 4min', Trader: 'Traders', Position: 'Positions', PnL: 'PnL', 'Avg. entry': 'Moy. entrée', Thesis: 'Thèse', 'Holders (128)': 'Détenteurs (128)', Swaps: 'Swaps', 'Thesis (4,933)': 'Thèse (255)', 'Friends only': 'Amis uniquement', 'Thesis only': 'Thèses uniquement', Alerts: 'Alertes', 'Market cap': 'Capitalisation' }, /(持有|held)\s*22h\s*4min/],
+  ].entries()) {
+    await page.evaluate((dict, loc) => {
       // 把页面上所有英文锚点文本节点换成译文（不加 Chrome 翻译的标记——这是 fomo 自己的语言）
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
       window.__l10nSaved = [];
       for (const n of nodes) {
         const v = n.nodeValue; let nv = v;
-        nv = nv.replace(/\b\d+d \d+h avg\. hold\b/g, dict.hold);
+        nv = nv.replace(/\d+d \d+h avg\. hold/g, dict.hold);
         for (const k of ['Holders (128)', 'Thesis (4,933)', 'Friends only', 'Thesis only', 'Avg. entry', 'Market cap', 'Trader', 'Position', 'PnL', 'Thesis', 'Swaps', 'Alerts']) {
-          if (k in dict) nv = nv.replace(new RegExp('\\b' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), dict[k]);
+          // 词界用前后瞻而不是 \b：'Holders (128)' 这种以 ')' 收尾的键，\b 会让整条替换失效
+          // （旧版就是这样，德法词表根本没替进页面，测试等于没测）。
+          if (k in dict) {
+            const esc = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            nv = nv.replace(new RegExp('(?<![A-Za-z0-9])' + esc + '(?![A-Za-z0-9])', 'g'), dict[k]);
+          }
         }
         if (nv !== v) { window.__l10nSaved.push([n, v]); n.nodeValue = nv; }
       }
-      document.documentElement.lang = Object.keys(dict).length ? (dict.Thesis === '观点' ? 'zh' : 'ja') : 'en';
-    }, dict);
-    await pushState(page, `/tokens/robinhood/${loc === 'zh' ? SLOW_CA : PONS_CA}`);
+      document.documentElement.lang = loc;
+    }, dict, loc);
+    // 每轮换一只币：URL 不变 SPA 就不重扫，卡片会留着上一轮的旧数据"假绿"（加 de/fr 时踩到）
+    await pushState(page, `/tokens/robinhood/${i % 2 === 0 ? SLOW_CA : PONS_CA}`);
     await sleep(1400);
     const l = await snap(page);
     const dl = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
@@ -1479,7 +1490,7 @@ try {
     step(`步骤 21n-${loc} · fomo 界面为 ${loc}：锚点全是译文 → Holders/Thesis 照常抓到`, [
       chk('Holders 6 行', l.kolRows === 6, [l.kolRows, dl.holdAnchors, dl.holderRows]),
       chk('Thesis 3 条', l.thesisRows === 3, l.thesisRows),
-      chk('持有时长显示译文单位', /持有 (2天4小时|22時間4分)|held (2天4小时|22時間4分)/.test(l.kolText), l.kolText.slice(0, 80)),
+      chk('持有时长显示译文单位', holdRe.test(l.kolText), l.kolText.slice(0, 80)),
       chk('diag: thesisCol=true, bottomTab=holders, friendsOnly=false', dl.thesisCol === true && dl.bottomTab === 'holders' && dl.friendsOnly === false, [dl.thesisCol, dl.bottomTab, dl.friendsOnly]),
       chk('diag pageLang 记录', dl.pageLang === loc, dl.pageLang),
     ]);
@@ -2250,7 +2261,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.7', mf.version === '0.9.7', mf.version),
+    chk('版本号为 0.9.8', mf.version === '0.9.8', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',

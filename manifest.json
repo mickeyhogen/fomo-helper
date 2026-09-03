@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fomo放大镜",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "在 fomo.family 浏览代币时，把 DeBot 叙事、社区 Thesis、持有人结构与来源推文聚成一张标签页浮动卡片。零后端，不采集任何数据。By @0xHogen",
   "permissions": [
     "storage"

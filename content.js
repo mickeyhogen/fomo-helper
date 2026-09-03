@@ -184,14 +184,32 @@
     marketCap:   ['Market\\s*cap', '市值', '時価総額', 'Marktkap\\.', 'Cap\\. de mercado', 'Capitalisation'],
     justNow:     ['just now', '刚刚', 'たった今', 'Gerade eben', 'Justo ahora', 'À l’instant', 'À l\'instant'],
   };
-  const isLatin = (w) => /^[A-Za-z\\\\]/.test(w) || /^[ÀÉÈÊÔÙ]/.test(w) || /^Ø/.test(w);
-  const alt = (list, exact) => '(?:' + list.map((w) => (isLatin(w) && !exact ? '\\b' + w + '\\b' : w)).join('|') + ')';
+  // 拉丁词才加词界（CJK 没有词界，加了必然失配）。首字符判定覆盖整个 Latin-1/扩展区，
+  // 别再逐个变音字母白名单——漏一个（Ü/Ä/ß）就是一门语言瞎掉。
+  const isLatin = (w) => /^[A-Za-z\\\\]/.test(w) || /^[À-ɏ]/.test(w);
+  // v0.9.8 scar：原来词界用 \b，而 \b 只认 ASCII \w —— 词首是 Ø/À、词尾是 \. 时，\b 反过来
+  // 要求相邻字符**必须**是 ASCII 字母数字，于是 "Ø Haltedauer"/"Ø Einstieg"/"Marktkap."/
+  // "Détention moy." 这些德法锚点永远匹配不上（v0.9.5~0.9.7 德法界面实际是瞎的，zh/ja 测试
+  // 覆盖不到）。改成"两侧不得紧邻 ASCII 字母数字"的前后瞻：词界判定与词本身的首尾字符解耦，
+  // 既照旧挡住 Synthesis / Traderss 这类词内误命中，又不再误杀非 ASCII 边缘。
+  const NO_ADJ_L = '(?<![A-Za-z0-9])';
+  const NO_ADJ_R = '(?![A-Za-z0-9])';
+  const alt = (list, exact) => '(?:' + list.map((w) => (isLatin(w) && !exact ? NO_ADJ_L + w + NO_ADJ_R : w)).join('|') + ')';
   const rx = (key, flags, exact) => new RegExp(alt(L10N[key], exact), flags || '');
   // 时长/相对时间单位：en(mo|d|h|m|s|w) + 中(天|小时|分钟|秒|周|个月) + 日(日|時間|分|秒|週|ヶ月) + 德(Tag|Tage|Std\.|Min\.|Mon\.) + 西/法(h|min|j|d|mes|meses|mois)
-  const DUR_UNIT = '(?:mo|[dhmsw]|天|小时|分钟|秒|周|个月|日|時間|分|週|ヶ月|Tage?|Std\\.?|Min\\.?|Mon\\.?|min|mes(?:es)?|mois|j)';
-  const DUR_RUN = '(?:\\d+\\s*' + DUR_UNIT + '\\s*)+';
+  // ⚠️ 顺序即语义：正则选择分支从左到右先到先得，**长单位必须排在单字母类 [dhmsw] 前面**，
+  // 否则 "4 Std." 会被 s 吃成 "4 S"、"4min" 会被 m 吃成 "4m"（DUR_RUN 不带 $ 锚点，
+  // 截短了照样算整体匹配成功，于是德法时长显示成 "2 Tage 4 S"）。改这行前先想清楚这条。
+  const DUR_UNIT = '(?:小时|分钟|个月|時間|ヶ月|Tage?|Std\\.?|Min\\.?|Mon\\.?|mes(?:es)?|mois|min|mo|天|秒|周|日|分|週|j|[dhmsw])';
+  // 上限 6 段（"2 Tage 4 Std. 30 Min." 撑死 3 段）：把嵌套量词的回溯规模钉死，
+  // 免得哪天页面塞进一长串数字时在正则里空转。
+  const DUR_RUN = '(?:\\d+\\s*' + DUR_UNIT + '\\s*){1,6}';
   const SCRAPE_HOLD_RE = rx('hold', 'i');            // 持仓行的锚点文案（联合）
   const SCRAPE_HOLD_G = rx('hold', 'gi');
+  // 无词界版：只用于扫 textContent（相邻单元格会被拼死，"…MEADGodØ Haltedauer" 这种
+  // 前面紧贴字母的情况带词界必然漏）。对着 innerText 判定时一律用上面带词界的版本。
+  const SCRAPE_HOLD_LOOSE = rx('hold', 'i', true);
+  const SCRAPE_HOLD_LOOSE_G = rx('hold', 'gi', true);
   // "2d 4h avg. hold"（英）或 "平均持仓 22小时4分钟"（中/日/德/法，锚点在前）
   const HOLD_DUR_RE = new RegExp('(' + DUR_RUN + ')\\s*' + alt(L10N.hold) + '|' + alt(L10N.hold) + '\\s*[:：]?\\s*(' + DUR_RUN + ')', 'i');
   const URL_IN_TEXT_RE = /https:\/\/[^\s<>"'）)】]+/g;
@@ -218,6 +236,7 @@
   let displayBrightness = 100;  // 亮度 50–150（friend 功能移植）
   let displayOpacity = 100;     // 透明度 35–100
   let updateInfo = null;        // {tag, url, newer:boolean} —— 版本检测结果
+  let leftPanelHow = 'never';   // rect|fallback|error|never —— 左栏排除这道防线的实际状态（进 diag）
   let els = null;          // 卡片内常用节点引用
   let savedPos = null;     // {left, top}
   let savedSize = null;    // {w, h} —— 拖过尺寸就记住（v0.9.3）
@@ -1095,8 +1114,11 @@ details.tweets > summary { color: #9aa0aa; }
 
   /** 版本号比较：a<b 返回 -1。只认数字段，"v" 前缀与后缀（如 0.9.5.3）都容得下。 */
   function cmpVersion(a, b) {
-    const pa = String(a).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
-    const pb = String(b).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+    // 先砍掉 -beta / +build 后缀再比：GitHub 的 releases/latest 本来就不给预发布，但真手滚了
+    // 一个 v0.9.8-beta.2，旧写法会把它切成 [0,9,8,2]，凭空多出一段就判成"比正式版新"。
+    const seg = (v) => String(v).replace(/^v/i, '').split(/[-+]/)[0].split('.').map((x) => parseInt(x, 10) || 0);
+    const pa = seg(a);
+    const pb = seg(b);
     for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
       const x = pa[i] || 0, y = pb[i] || 0;
       if (x !== y) return x < y ? -1 : 1;
@@ -1130,9 +1152,12 @@ details.tweets > summary { color: #9aa0aa; }
     const old = els.byfoot.querySelector('.upd');
     if (old) old.remove();
     if (!updateInfo || !updateInfo.newer) return;
+    // 这个 href 来自发布说明正文（后台已只认 https 的 x.com/twitter.com 状态链接）。
+    // 纵深防御：渲染前再验一次协议，后台哪天改松了也落不到 javascript:/data: 上。
+    const safeUrl = /^https:\/\//i.test(String(updateInfo.url || '')) ? updateInfo.url : RELEASE_PAGE;
     const a = h('a', {
       cls: 'upd', text: tr('updateReady') + ' ' + updateInfo.tag + ' ↗',
-      href: updateInfo.url || RELEASE_PAGE,
+      href: safeUrl,
       attrs: { target: '_blank', rel: 'noopener noreferrer' },
       title: (updateInfo.gist ? updateInfo.gist + '\n\n' : '') + tr('updateHint'),
     });
@@ -1156,6 +1181,7 @@ details.tweets > summary { color: #9aa0aa; }
     d.bottomTab = fomoBottomTab();
     d.friendsOnly = friendsOnlyActive();
     d.translated = pageTranslated();
+    d.leftPanel = leftPanelHow;   // rect=认出左栏 / fallback=靠几何兜底 / error=防线挂了
     d.htmlClass = String(document.documentElement.className || '').slice(0, 40) || '-';
     d.pageLang = document.documentElement.lang || '-';   // fomo 自己的界面语言（Lingui 会写到 <html lang>）
     d.cjk = (bodyText.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
@@ -1358,7 +1384,17 @@ details.tweets > summary { color: #9aa0aa; }
     displayBrightness = Math.min(150, Math.max(50, Number(brightness) || 100));
     displayOpacity = Math.min(100, Math.max(35, Number(opacity) || 100));
     applyDisplayAppearance();
-    try { chrome.storage.local.set({ displayBrightness, displayOpacity }); } catch (_) { /* 忽略 */ }
+    persistDisplayAppearance();
+  }
+
+  /** 拖一次滑块能打出几十个 input 事件；视觉即时生效，落盘攒 200ms 再写一次。 */
+  let displayPersistTimer = null;
+  function persistDisplayAppearance() {
+    if (displayPersistTimer) clearTimeout(displayPersistTimer);
+    displayPersistTimer = setTimeout(() => {
+      displayPersistTimer = null;
+      try { chrome.storage.local.set({ displayBrightness, displayOpacity }); } catch (_) { /* 忽略 */ }
+    }, 200);
   }
 
   function closeCard() {
@@ -2123,7 +2159,7 @@ details.tweets > summary { color: #9aa0aa; }
     return v;
   }
 
-  const holdCount = (t) => (String(t || '').match(SCRAPE_HOLD_G) || []).length;
+  const holdCount = (t) => (String(t || '').match(SCRAPE_HOLD_LOOSE_G) || []).length;   // 只喂 textContent
 
   /** 数据行必须自带作者锚（profile 链接 / 头像），表头与汇总行没有，天然被挡在外面。 */
   function hasRowAnchor(row) {
@@ -2141,11 +2177,11 @@ details.tweets > summary { color: #9aa0aa; }
     for (const el of all) {
       let t;
       try { t = el.textContent || ''; } catch (_) { continue; }
-      if (!SCRAPE_HOLD_RE.test(t)) continue;
+      if (!SCRAPE_HOLD_LOOSE.test(t)) continue;   // t = textContent，拼死的，用无词界版
       // 取最内层命中者，避免把整张表当成一行
       let innermost = true;
       for (const c of el.children) {
-        if (SCRAPE_HOLD_RE.test(c.textContent || '')) { innermost = false; break; }
+        if (SCRAPE_HOLD_LOOSE.test(c.textContent || '')) { innermost = false; break; }
       }
       if (!innermost) continue;
 
@@ -2354,6 +2390,12 @@ details.tweets > summary { color: #9aa0aa; }
   const COL_PNL_RE = rx('pnl', 'i');
   const COL_ENTRY_RE = rx('entry', 'i');
   const COL_THESIS_RE = rx('thesis');
+  // 无词界的宽松版：只给"便宜预筛"用（textContent 会把相邻单元格拼死，带词界必失配）。
+  // 精确判定一律走上面带词界的版本 + innerText。
+  const COL_TRADER_LOOSE = rx('trader', 'i', true);
+  const COL_POSITION_LOOSE = rx('position', 'i', true);
+  const COL_ENTRY_LOOSE = rx('entry', 'i', true);
+  const COL_THESIS_LOOSE = rx('thesis', 'i', true);
   // traderCellName 会用到这几个（保留）
   const TIMEISH_RE = /^\d+\s*[smhdw]$/i;
   const PRICEISH_RE = /^[$＄]?[\d,.]+\s*[KMB%]?$/i;
@@ -2409,8 +2451,12 @@ details.tweets > summary { color: #9aa0aa; }
       let raw;
       try { raw = el.textContent || ''; } catch (_) { continue; }
       if (!raw || raw.length > 200) continue;   // 列头很短；跳过大容器，别去读整张表
-      if (!COL_TRADER_RE.test(raw) || !COL_POSITION_RE.test(raw)
-        || !COL_THESIS_RE.test(raw) || !COL_ENTRY_RE.test(raw)) continue;
+      // v0.9.8 scar：这道**便宜预筛**只能用无词界的宽松版。上面那句注释早就写明 textContent
+      // 会把列头拼成 "TraderPosition"（线上/mock 的 hcol 之间没有空白节点），可预筛用的却是
+      // 带词界的 COL_*_RE —— 于是拉丁语系（含英文）在这一步就被判死，innerText 那道精确判定
+      // 根本没机会跑；只有中日文因为 CJK 不加词界才侥幸通过（zh/ja 测试因此全绿）。
+      if (!COL_TRADER_LOOSE.test(raw) || !COL_POSITION_LOOSE.test(raw)
+        || !COL_THESIS_LOOSE.test(raw) || !COL_ENTRY_LOOSE.test(raw)) continue;
       const t = oneLine(cleanText(el));   // innerText：块级单元格间会带空格，词界判定才准
       if (!COL_TRADER_RE.test(t) || !COL_POSITION_RE.test(t)
         || !COL_ENTRY_RE.test(t) || !COL_THESIS_RE.test(t)) continue;
@@ -2526,8 +2572,11 @@ details.tweets > summary { color: #9aa0aa; }
     // 以左栏容器为准排除；容器认不出时退回宽度/位置兜底。
     // 注意：findLeftPanel() 返回的是 DOMRect，不是元素——别对它调 .contains（会抛，
     // 然后被 catch 吞掉，连带下面的几何判定一起失效。v0.9.6 就栽在这上面。）
+    // v0.9.8：认没认出左栏要留痕。v0.9.6 那次就是 catch 把异常吞了、整道防线静默失效，
+    // 页面上只表现为"评论对不上号"，没人看得出防线已经不在了。现在写进 diag。
     let panelRect = null;
-    try { panelRect = findLeftPanel(); } catch (_) { panelRect = null; }
+    try { panelRect = findLeftPanel(); leftPanelHow = panelRect ? 'rect' : 'fallback'; }
+    catch (_) { panelRect = null; leftPanelHow = 'error'; }
     const inLeftPanel = (el) => {
       let r;
       try { r = el.getBoundingClientRect(); } catch (_) { return false; }
@@ -2535,14 +2584,17 @@ details.tweets > summary { color: #9aa0aa; }
       const cx = r.left + r.width / 2;
       // ① 水平中心落在左栏矩形内 ② 兜底：又窄又靠左（左栏 w≈214/280，主面板 w≈806）
       if (panelRect && cx >= panelRect.left - 4 && cx <= panelRect.right + 4) return true;
-      if (r.width < 300 && r.left < window.innerWidth * LEFT_ZONE_RATIO) return true;
+      // 兜底只在「认不出左栏 + 桌面宽度」时用：窄视口下 fomo 会把左栏收起来，
+      // 这时主面板自己也又窄又靠左，再套这条就是把正主的评论全判成左栏（宁可漏排除，不可错杀）。
+      if (!panelRect && window.innerWidth >= 900
+          && r.width < 300 && r.left < window.innerWidth * LEFT_ZONE_RATIO) return true;
       return false;
     };
     const seenRows = [];
     for (const el of all) {
       let raw;
       try { raw = el.textContent || ''; } catch (_) { continue; }
-      if (!raw || raw.length > 300 || !COL_THESIS_RE.test(raw)) continue;
+      if (!raw || raw.length > 300 || !COL_THESIS_LOOSE.test(raw)) continue;   // 预筛：textContent 拼死，无词界版
       const head = oneLine(cleanText(el));
       if (!COMMENT_HEAD_RE.test(head)) continue;
       if (inLeftPanel(el)) continue;   // 左栏全局流：不是当前币的评论

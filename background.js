@@ -311,7 +311,12 @@ const VERSION_CACHE_KEY = 'updateCheckCache';
  */
 function releaseGist(body) {
   const text = String(body || '');
+  // 这段字要直接进用户看得见的 tooltip，Markdown 记号得清干净：粗体/行内码之外，
+  // 还有链接 [文字](url)、删除线 ~~、成对下划线斜体（不碰 snake_case 里的下划线）。
   const strip = (line) => line.replace(/^\s*[-*+]\s+/, '').replace(/^[\s>#]+/, '')
+    .replace(/!?\[([^\]]{1,80})\]\([^)]*\)/g, '$1')
+    .replace(/~~/g, '')
+    .replace(/(^|\s)_([^_\s][^_]{0,60})_(?=[\s.,;:!?)]|$)/g, '$1$2')
     .replace(/\*\*/g, '').replace(/`/g, '').trim();
   const isHeading = (raw) => /^\s*#/.test(raw) || /[:：]\s*$/.test(raw);
   const lines = text.split(/\r?\n/);
@@ -345,7 +350,9 @@ async function handleVersion(msg) {
     const body = String(r.json.body || '');
     // 发布说明里贴了推特链接就优先跳那条推（主人引流用）；没贴则回落 GitHub 发布页。
     // 只认 https 的 x.com / twitter.com 状态链接，别的一律不跟。
-    const tw = body.match(/https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,20}\/status\/\d{5,25}/);
+    // 句柄最长 15 位（X 的硬上限），状态号现役 19 位——收紧到 10~25 位，
+    // 别让 /status/12345 这种明显不是推文的短号也被当成落点。
+    const tw = body.match(/https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d{10,25}(?![0-9])/);
     const link = tw ? tw[0] : url;
     const gist = releaseGist(body);
     const payload = { tag, url, link, gist, cached: false };
