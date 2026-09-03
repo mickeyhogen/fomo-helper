@@ -304,6 +304,30 @@ const RELEASE_URL = 'https://api.github.com/repos/mickeyhogen/fomo-helper/releas
 const VERSION_TTL_MS = 6 * 60 * 60 * 1000;   // 主人定：每 6 小时
 const VERSION_CACHE_KEY = 'updateCheckCache';
 
+/**
+ * 发布说明 → 一句"这版改了什么"（悬停提示用）。
+ * 实测教训：直接取第一行非空文本会拿到 "**Fixes (both reported by real users)**" 这种分节标题，
+ * 对用户毫无信息。所以优先取第一条**列表项**（真正的变更条目），没有列表才退回普通正文行。
+ */
+function releaseGist(body) {
+  const text = String(body || '');
+  const strip = (line) => line.replace(/^\s*[-*+]\s+/, '').replace(/^[\s>#]+/, '')
+    .replace(/\*\*/g, '').replace(/`/g, '').trim();
+  const isHeading = (raw) => /^\s*#/.test(raw) || /[:：]\s*$/.test(raw);
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {                       // 第一优先：列表项
+    if (!/^\s*[-*+]\s+/.test(raw)) continue;
+    const t = strip(raw);
+    if (t.length >= 6 && !/^https?:\/\//i.test(t)) return t.slice(0, 110);
+  }
+  for (const raw of lines) {                       // 退回：非标题正文行
+    const t = strip(raw);
+    if (!t || t.length < 6 || /^https?:\/\//i.test(t) || isHeading(raw)) continue;
+    return t.slice(0, 110);
+  }
+  return '';
+}
+
 async function handleVersion(msg) {
   try {
     if (!msg || !msg.force) {
@@ -323,13 +347,7 @@ async function handleVersion(msg) {
     // 只认 https 的 x.com / twitter.com 状态链接，别的一律不跟。
     const tw = body.match(/https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,20}\/status\/\d{5,25}/);
     const link = tw ? tw[0] : url;
-    // 首行摘要：跳过标题/空行/markdown 记号，取第一句人话，截断 90 字
-    let gist = '';
-    for (const raw of body.split(/\r?\n/)) {
-      const t = raw.replace(/^[\s>*_#-]+/, '').replace(/\*\*/g, '').trim();
-      if (!t || /^https?:\/\//i.test(t) || t.length < 6) continue;
-      gist = t.slice(0, 90); break;
-    }
+    const gist = releaseGist(body);
     const payload = { tag, url, link, gist, cached: false };
     try { await chrome.storage.local.set({ [VERSION_CACHE_KEY]: Object.assign({ at: Date.now() }, payload) }); } catch (_) { /* 忽略 */ }
     return { ok: true, payload };

@@ -1330,6 +1330,55 @@ try {
     ]);
   }
 
+  // --- 21t (v0.9.6) 更新提示落点：发布说明贴了推特就跳推特，没贴回落 GitHub；悬停带摘要 ---
+  {
+    const TW = 'https://x.com/0xHogen/status/1234567890123456789';
+    const pTw = await openPage({ versionTag: 'v9.9.9', versionLink: TW, versionGist: '卡片支持六种界面语言' });
+    await pushState(pTw, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const tw = await pTw.evaluate(() => {
+      const a = window.__fomoDebotTestHandle.shadow.querySelector('.byfoot .upd');
+      return { href: a ? a.getAttribute('href') : '', title: a ? a.getAttribute('title') : '' };
+    });
+    await pTw.close();
+    const pGh = await openPage({ versionTag: 'v9.9.9' });
+    await pushState(pGh, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const gh = await pGh.evaluate(() => {
+      const a = window.__fomoDebotTestHandle.shadow.querySelector('.byfoot .upd');
+      return a ? a.getAttribute('href') : '';
+    });
+    await pGh.close();
+    step('步骤 21t · 更新提示落点：有推特链接跳推特，没有回落 GitHub，悬停显示摘要', [
+      chk('贴了推特 → 跳那条推', tw.href === TW, tw.href),
+      chk('悬停提示带这版摘要', /六种界面语言/.test(tw.title || ''), tw.title),
+      chk('没贴 → 回落 GitHub 发布页', /github\.com\/mickeyhogen\/fomo-helper\/releases/.test(gh), gh),
+    ]);
+  }
+
+  // --- 21u (v0.9.6) 发布说明摘要：取变更条目，不取分节标题（真 release notes 形态回放） ---
+  {
+    const real = [
+      '**Fixes (both reported by real users)**',
+      "- **fomo's non-English UI broke Thesis and Holders.** Every scraping anchor was hard-coded English.",
+      '- Second bullet.',
+      '',
+      '**New**',
+      '- Brightness / opacity control.',
+    ].join('\n');
+    const r = await page.evaluate((body) => ({
+      real: typeof releaseGist === 'function' ? releaseGist(body) : '__missing__',
+      headingOnly: typeof releaseGist === 'function' ? releaseGist('**Fixes**\n\nSome prose line here that is long enough.') : '__missing__',
+      empty: typeof releaseGist === 'function' ? releaseGist('') : '__missing__',
+    }), real);
+    step('步骤 21u · 发布说明摘要取变更条目而非分节标题', [
+      chk('取到第一条变更条目', /non-English UI broke/.test(r.real), r.real),
+      chk('没把 "Fixes" 分节标题当摘要', !/^Fixes/.test(r.real), r.real),
+      chk('没有列表时退回正文行（跳过标题）', /Some prose line/.test(r.headingOnly), r.headingOnly),
+      chk('空说明返回空串不炸', r.empty === '', r.empty),
+    ]);
+  }
+
   // --- 21q (v0.9.6) 左栏全局活动流里"别的币"的 thesis 不许混进评论流 ---
   {
     await pushState(page, `/tokens/robinhood/${PONS_CA}`);
@@ -2201,7 +2250,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.6', mf.version === '0.9.6', mf.version),
+    chk('版本号为 0.9.7', mf.version === '0.9.7', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
