@@ -68,7 +68,8 @@
   const I18N = {
     zh: {
       copyCa: '复制合约地址', pin: '固定卡片', langBtn: '切换译文语言', refresh: '重新抓取', close: '关闭',
-      dragHint: '拖动移动卡片；双击回到默认停靠位', docked: '已回到默认位置',
+      dragHint: '拖动移动卡片；双击回到默认大小和位置', docked: '已回到默认大小和位置',
+      resizeHint: '拖动调整卡片大小（会记住）',
       preview: '预览', launcher: 'Fomo放大镜：查看当前代币的叙事/观点/持仓', copied: '已复制',
       notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
       source: '↗ 来源', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
@@ -96,7 +97,8 @@
     },
     en: {
       copyCa: 'Copy contract address', pin: 'Pin card', langBtn: 'Switch language', refresh: 'Refresh', close: 'Close',
-      dragHint: 'Drag to move; double-click to snap back to the default dock', docked: 'Back to default position',
+      dragHint: 'Drag to move; double-click to reset size and position', docked: 'Back to default size and position',
+      resizeHint: 'Drag to resize (remembered)',
       preview: 'preview', launcher: 'Fomo Helper: narrative / theses / holders of this token', copied: 'Copied',
       notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
       source: '↗ source', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
@@ -137,6 +139,8 @@
   const DOCK_MIN_TOP = 190;
   const DOCK_BOTTOM_RESERVE = 140;
   const DOCK_FALLBACK = { left: 312, top: 200 };
+  const RESIZE_MIN_W = 280;   // 再窄标签栏就挤了
+  const RESIZE_MIN_H = 220;
 
   // v0.5：fomo 的 /hodlers/* API 已被 Cloudflare 挡掉（对程序化请求一律 403），
   // 改为直接读页面里 fomo React 已经渲染好的 DOM，零网络、绕开鉴权与风控。
@@ -169,11 +173,13 @@
 
   // ---------- 运行态 ----------
   let host = null;         // shadow 宿主
+  let grip = null;         // 右下角尺寸手柄
   let shadow = null;       // closed ShadowRoot
   let card = null;         // 卡片根节点
   let launcher = null;     // "叙" 圆钮
   let els = null;          // 卡片内常用节点引用
   let savedPos = null;     // {left, top}
+  let savedSize = null;    // {w, h} —— 拖过尺寸就记住（v0.9.3）
 
   // 四个数据源各自独立成段、独立到达、独立渲染：
   // 任何一个慢或挂，都不许拖住其它段（尤其自配分析源不许拖住 DeBot）。
@@ -349,7 +355,11 @@
       });
     } catch (_) { if (cb) cb(); }
     try {
-      chrome.storage.local.get({ cardPos: null, translatorReady: false }, (v) => {
+      chrome.storage.local.get({ cardPos: null, cardSize: null, translatorReady: false }, (v) => {
+        if (v && v.cardSize && typeof v.cardSize.w === 'number') {
+          savedSize = v.cardSize;
+          if (card) applySize();
+        }
         if (v && v.cardPos && typeof v.cardPos.left === 'number') {
           savedPos = v.cardPos;
           if (card) applyPos();
@@ -501,7 +511,14 @@
 .sbtn.on { color: #fff; border-color: #4a4d54; background: #1a1c20; }
 /* v0.8.9：页尾署名 */
 .byfoot { flex: 0 0 auto; text-align: right; font-size: 10px; color: #4a4d54;
-          padding: 3px 12px 5px; border-top: 1px solid #1e2024; letter-spacing: .3px; }
+          padding: 3px 20px 5px 12px; border-top: 1px solid #1e2024; letter-spacing: .3px; }
+/* v0.9.3：右下角尺寸手柄。默认几乎看不见，悬停/拖动时才亮——不抢卡片本身的视觉 */
+.grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+        cursor: nwse-resize; z-index: 3; opacity: .35; }
+.grip::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px;
+               border-right: 2px solid #6a6e76; border-bottom: 2px solid #6a6e76; border-radius: 0 0 2px 0; }
+.grip:hover, .card.resizing .grip { opacity: 1; }
+.card.resizing { user-select: none; }
 .byfoot a { color: #6a6e76; text-decoration: none; }
 .byfoot a:hover { color: #9aa0aa; text-decoration: underline; }
 .body {
@@ -726,7 +743,9 @@ details.tweets > summary { color: #9aa0aa; }
       h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
         attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo放大镜 · Fomo Helper — by @0xHogen' } }),
     ]);
-    card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot]);
+    grip = h('div', { cls: 'grip', title: tr('resizeHint') });
+    grip.addEventListener('mousedown', onResizeStart);
+    card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot, grip]);
     card.hidden = true;
     card.addEventListener('mouseenter', () => { cancelHide(); rescanNow(); });
     card.addEventListener('mouseleave', () => { if (state.mode === 'preview') scheduleHide(); });
@@ -746,7 +765,7 @@ details.tweets > summary { color: #9aa0aa; }
             pairsWrap, pvChip, hdr, body, tabBtns,
             paneNarrative, paneViews, paneHolders,
             slotDebot, slotDebotTail, slotThesis, slotAnalysis, slotKol, slotTweets };
-    applyPos();
+    applySize();   // 记住过的尺寸先贴上；内部会调 applyPos 定位（v0.9.3）
   }
 
   /**
@@ -848,9 +867,13 @@ details.tweets > summary { color: #9aa0aa; }
       card.style.left = left + 'px';
       card.style.top = top + 'px';
       card.style.right = 'auto';
-      // 给下方 Holders 表留出空间
-      const room = Math.max(160, window.innerHeight - top - DOCK_BOTTOM_RESERVE);
-      card.style.maxHeight = 'min(58vh, ' + room + 'px)';
+      // 给下方 Holders 表留出空间。用户自定过尺寸时不再压高度——那是他自己拉的（v0.9.3）
+      if (savedSize && typeof savedSize.h === 'number') {
+        card.style.maxHeight = 'none';
+      } else {
+        const room = Math.max(160, window.innerHeight - top - DOCK_BOTTOM_RESERVE);
+        card.style.maxHeight = 'min(58vh, ' + room + 'px)';
+      }
     } catch (_) {
       // 极端情况下退回一个安全的默认位置
       try {
@@ -890,6 +913,53 @@ details.tweets > summary { color: #9aa0aa; }
     e.preventDefault();
   }
 
+  /** 把记住的尺寸贴回卡片；没记过就还原成默认（宽度靠 CSS，高度交回 applyPos 的上限逻辑）。 */
+  function applySize() {
+    if (!card) return;
+    if (savedSize && typeof savedSize.w === 'number') {
+      card.style.width = savedSize.w + 'px';
+      card.style.height = savedSize.h + 'px';
+    } else {
+      card.style.width = '';
+      card.style.height = '';
+    }
+    applyPos();   // maxHeight 归 applyPos 管，两边保持一致
+  }
+
+  /**
+   * 右下角手柄拖尺寸。与拖动位置同款：过程中直接改 inline 样式，松手才写 storage。
+   * 下限保证卡片不会被拉到看不清；上限不超出视口。
+   */
+  function onResizeStart(e) {
+    if (e.button !== 0 || !card) return;
+    e.preventDefault();
+    e.stopPropagation();          // 别让它冒泡成"点卡外/拖头部"
+    const rect = card.getBoundingClientRect();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const w0 = rect.width;
+    const h0 = rect.height;
+    card.classList.add('resizing');
+    card.style.maxHeight = 'none';
+    cancelHide();
+
+    const move = (ev) => {
+      const w = Math.min(Math.max(RESIZE_MIN_W, w0 + (ev.clientX - x0)), window.innerWidth - rect.left - 8);
+      const h = Math.min(Math.max(RESIZE_MIN_H, h0 + (ev.clientY - y0)), window.innerHeight - rect.top - 8);
+      card.style.width = Math.round(w) + 'px';
+      card.style.height = Math.round(h) + 'px';
+      savedSize = { w: Math.round(w), h: Math.round(h) };
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      card.classList.remove('resizing');
+      try { chrome.storage.local.set({ cardSize: savedSize }); } catch (_) { /* 忽略 */ }
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+  }
+
   function onHeaderDblClick(e) {
     if (e.target && e.target.closest && e.target.closest('button, a')) return;
     resetDock();
@@ -898,8 +968,9 @@ details.tweets > summary { color: #9aa0aa; }
   /** 清掉拖动记忆，回到默认停靠位（storage 里的 cardPos 一并删除）。 */
   function resetDock() {
     savedPos = null;
-    try { chrome.storage.local.remove('cardPos'); } catch (_) { /* 忽略 */ }
-    applyPos();
+    savedSize = null;
+    try { chrome.storage.local.remove(['cardPos', 'cardSize']); } catch (_) { /* 忽略 */ }
+    applySize();   // 内部会调 applyPos，位置与尺寸一起归位
     toast(tr('docked'));
   }
 
@@ -944,6 +1015,7 @@ details.tweets > summary { color: #9aa0aa; }
     els.hdr.setAttribute('title', tr('dragHint'));
     els.langBusy.textContent = tr('trBusy');
     els.pvChip.textContent = tr('preview');
+    if (grip) grip.setAttribute('title', tr('resizeHint'));
     if (launcher) launcher.setAttribute('title', tr('launcher'));
   }
 
@@ -3098,6 +3170,7 @@ details.tweets > summary { color: #9aa0aa; }
           pinned: state.pinned, status: state.status, lang: settings.lang,
           openMode: settings.openMode, compact: state.compact,
           tab: state.tab,
+          size: card ? { w: Math.round(card.getBoundingClientRect().width), h: Math.round(card.getBoundingClientRect().height) } : null,
           errorKind: state.errorKind,
           analysis: state.analysis.status,
           holders: state.holders.status,

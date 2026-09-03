@@ -188,7 +188,7 @@ function chromeShim(fx) {
       if (cb) setTimeout(cb, 0);
       return Promise.resolve();
     },
-    remove(k, cb) { delete store[name][k]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+    remove(k, cb) { for (const key of (Array.isArray(k) ? k : [k])) delete store[name][key]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
   });
   window.__setSetting = (obj) => area('sync').set(obj);
   const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
@@ -1371,6 +1371,58 @@ try {
         chk('双击后回到停靠位', back.left === dock.left && back.top === dock.top, [dock, back]),
         chk('cardPos 已清除', cleared === null, cleared),
       ]);
+
+    // --- 24c-2 (v0.9.3) 右下角手柄拖尺寸；尺寸持久化；双击头部连尺寸一起归位 ---
+    {
+      const before = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { w: Math.round(c.width), h: Math.round(c.height) };
+      });
+      const gp = await page.evaluate(() => {
+        const g = window.__fomoDebotTestHandle.shadow.querySelector('.grip');
+        if (!g) return null;
+        const r = g.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await page.mouse.move(gp.x, gp.y);
+      await page.mouse.down();
+      await page.mouse.move(gp.x + 120, gp.y + 90, { steps: 6 });
+      await page.mouse.up();
+      await sleep(250);
+      const resized = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { w: Math.round(c.width), h: Math.round(c.height) };
+      });
+      const storedSize = await page.evaluate(() => new Promise((res) => chrome.storage.local.get({ cardSize: null }, (v) => res(v.cardSize))));
+      // 拖到比下限还小 → 卡在下限，不许把卡片拉没
+      await page.mouse.move(gp.x + 120, gp.y + 90);
+      await page.mouse.down();
+      await page.mouse.move(gp.x - 300, gp.y - 300, { steps: 6 });
+      await page.mouse.up();
+      await sleep(200);
+      const floored = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { w: Math.round(c.width), h: Math.round(c.height) };
+      });
+      await page.evaluate(() => {
+        const n = window.__fomoDebotTestHandle.shadow.querySelector('.name');
+        n.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, composed: true }));
+      });
+      await sleep(250);
+      const back = await page.evaluate(() => {
+        const c = window.__fomoDebotTestHandle.shadow.querySelector('.card').getBoundingClientRect();
+        return { w: Math.round(c.width), h: Math.round(c.height) };
+      });
+      const clearedSize = await page.evaluate(() => new Promise((res) => chrome.storage.local.get({ cardSize: null }, (v) => res(v.cardSize))));
+      step('步骤 24c-2 · 手柄拖尺寸 → 记住 → 双击连尺寸一起归位', [
+        chk('手柄存在', !!gp, gp),
+        chk('拖后变大', resized.w > before.w + 40 && resized.h > before.h + 40, [before, resized]),
+        chk('尺寸写入 cardSize', !!storedSize && storedSize.w === resized.w, [storedSize, resized]),
+        chk('拖到极小时卡在下限(280x220)', floored.w === 280 && floored.h === 220, floored),
+        chk('双击后回默认尺寸', back.w === before.w && back.h === before.h, [before, back]),
+        chk('cardSize 已清除', clearedSize === null, clearedSize),
+      ]);
+    }
     }
   }
 
@@ -1797,7 +1849,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.2', mf.version === '0.9.2', mf.version),
+    chk('版本号为 0.9.3', mf.version === '0.9.3', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
