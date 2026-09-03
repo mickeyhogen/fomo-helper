@@ -10,6 +10,7 @@
 | `app.debot.ai`（备用 `debot.ai`） | 拉取代币叙事分析 | 公开接口，不登录、不带 cookie、无 key |
 | `api.fxtwitter.com` | 叙事来源推文正文 | 公开只读，不登录、不发帖 |
 | `api.dexscreener.com` | 这只币的流动性池/交易对（头部 chips） | 公开只读，不登录、无 key |
+| `api.github.com` | 版本检测：查本项目最新发布版本号（每 6 小时一次，可在设置里关闭） | 公开只读，不登录、无 key、不发送任何页面或代币信息 |
 
 观点与持仓者两页**完全不联网**：它们直接读 fomo 页面上已经渲染好的内容，一个请求都不发。
 
@@ -41,7 +42,7 @@ manifest 里也不再申请任何通配权限。
 
 ```
 permissions:       storage
-host_permissions:  https://app.debot.ai/*, https://debot.ai/*, https://api.fxtwitter.com/*
+host_permissions:  https://app.debot.ai/*, https://debot.ai/*, https://api.fxtwitter.com/*, https://api.dexscreener.com/*, https://api.github.com/*
 content_scripts:   https://fomo.family/*
 ```
 

@@ -221,6 +221,13 @@ function chromeShim(fx) {
             if (t) list.push(t);
           }
           reply = { ok: true, payload: list };
+        } else if (msg.type === 'version-check') {
+          reply = fx.versionTag
+            ? { ok: true, payload: { tag: fx.versionTag,
+                url: 'https://github.com/mickeyhogen/fomo-helper/releases/tag/' + fx.versionTag,
+                link: fx.versionLink || 'https://github.com/mickeyhogen/fomo-helper/releases/tag/' + fx.versionTag,
+                gist: fx.versionGist || '' } }
+            : { ok: false, kind: 'network' };
         } else if (msg.type === 'dex-pairs') {
           reply = Array.isArray(fx.pairs) ? { ok: true, payload: fx.pairs } : { ok: false, kind: 'network' };
         } else reply = { ok: false, kind: 'network', error: 'unknown message' };
@@ -255,7 +262,7 @@ async function snap(page) {
       text: card ? card.textContent : '',
       name: (sh.querySelector('.name') || {}).textContent || '',
       starsOn: sh.querySelectorAll('.star.on').length,
-      summaries: txts('summary'),
+      summaries: Array.from(sh.querySelectorAll('summary')).map((e) => { const t = e.querySelector('.sum-t'); return (t ? t.textContent : e.textContent).trim(); }),
       previewChip: !!pv && !pv.hidden,
       langBtn: (() => { const b = sh.querySelector('.btn.lang'); return b && !b.hidden ? b.textContent : null; })(),
       // v0.7 头部：地址收进复制钮；中/EN 双档高亮
@@ -340,7 +347,7 @@ async function snap(page) {
       thesisTexts: txts('.slot-thesis .rtext'),
       tweetTexts: txts('details.tweets .rtext'),
       // v0.6 DeBot 段默认展开/收起状态（内容一条不少，只是默认态分层）
-      debotOrder: Array.from(sh.querySelectorAll('.slot-debot details > summary, .slot-debot-tail details > summary')).map((e) => e.textContent),
+      debotOrder: Array.from(sh.querySelectorAll('.slot-debot details > summary, .slot-debot-tail details > summary')).map((e) => { const t = e.querySelector('.sum-t'); return (t ? t.textContent : e.textContent).trim(); }),
       // 折叠与否按"整段高度 - 摘要行高度"判定：折叠时 details 只占摘要一行
       debotSections: Array.from(sh.querySelectorAll('.slot-debot details, .slot-debot-tail details')).map((d) => {
         const sum = d.querySelector('summary');
@@ -427,12 +434,14 @@ async function openPopup(seed) {
   await pp.evaluateOnNewDocument((seedObj) => {
     const store = Object.assign({}, seedObj || {});
     window.__store = store;
+    const mkArea = (backing) => ({
+      get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in backing) ? backing[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
+      set(o, cb) { Object.assign(backing, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+      remove(k, cb) { const arr = Array.isArray(k) ? k : [k]; for (const x of arr) delete backing[x]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+    });
+    window.__local = {};
     window.chrome = {
-      storage: { sync: {
-        get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in store) ? store[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
-        set(o, cb) { Object.assign(store, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
-        remove(k, cb) { const arr = Array.isArray(k) ? k : [k]; for (const x of arr) delete store[x]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
-      } },
+      storage: { sync: mkArea(store), local: mkArea(window.__local) },
       permissions: { request: () => Promise.resolve(true), contains: () => Promise.resolve(true) },
     };
   }, seed || {});
@@ -546,7 +555,7 @@ try {
         await page.evaluate(() => {
           const sh = window.__fomoDebotTestHandle.shadow;
           const d = Array.from(sh.querySelectorAll('.slot-debot details, .slot-debot-tail details'))
-            .find((x) => (x.querySelector('summary') || {}).textContent === '评级理由');
+            .find((x) => { const s = x.querySelector('summary'); if (!s) return false; const tt = s.querySelector('.sum-t'); return (tt ? tt.textContent : s.textContent).trim() === '评级理由'; });
           return !!d && d.classList.contains('rating');
         }), null),
       chk('传播默认收起', !!find('传播') && find('传播').open === false, find('传播')),
@@ -1293,6 +1302,140 @@ try {
     ]);
   }
 
+  // --- 21r (v0.9.6) 版本检测：有新版在页尾提示；关掉设置就不提示 ---
+  {
+    const pU = await openPage({ versionTag: 'v9.9.9' });
+    await pushState(pU, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const on = await pU.evaluate(() => {
+      const a = window.__fomoDebotTestHandle.shadow.querySelector('.byfoot .upd');
+      return { shown: !!a, text: a ? a.textContent : '', href: a ? a.getAttribute('href') : '' };
+    });
+    await pU.close();
+    const pOff = await openPage({ versionTag: 'v9.9.9', syncSeed: { updateCheck: false } });
+    await pushState(pOff, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const off = await pOff.evaluate(() => !!window.__fomoDebotTestHandle.shadow.querySelector('.byfoot .upd'));
+    await pOff.close();
+    const pSame = await openPage({ versionTag: 'v0.0.1' });   // 线上比本地旧 → 不该提示
+    await pushState(pSame, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1000);
+    const same = await pSame.evaluate(() => !!window.__fomoDebotTestHandle.shadow.querySelector('.byfoot .upd'));
+    await pSame.close();
+    step('步骤 21r · 版本检测：有新版才提示，可关，旧 tag 不误报', [
+      chk('线上 9.9.9 → 页尾出现提示', on.shown === true, on),
+      chk('提示带版本号与 GitHub 链接', /9\.9\.9/.test(on.text) && /github\.com/.test(on.href), on),
+      chk('关掉「检查新版本」→ 不提示', off === false, off),
+      chk('线上 tag 比本地旧 → 不提示', same === false, same),
+    ]);
+  }
+
+  // --- 21q (v0.9.6) 左栏全局活动流里"别的币"的 thesis 不许混进评论流 ---
+  {
+    await pushState(page, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(1200);
+    const feed = await page.evaluate(() => {
+      const a = window.__fomoDebotTestHandle.state.feed || [];
+      return { n: a.length, authors: a };
+    });
+    const decoyVisible = await page.evaluate(() => !!document.getElementById('decoy-left-thesis'));
+    step('步骤 21q · 左栏全局流的"别的币"评论被排除在评论流之外', [
+      chk('诱饵确实在页面上', decoyVisible === true, decoyVisible),
+      chk('评论流没收进 OTHERCOIN_GUY', !feed.authors.some((a) => /OTHERCOIN_GUY/i.test(a)), feed.authors),
+      chk('本币评论流仍抓到', feed.n > 0, feed.n),
+    ]);
+  }
+
+  // --- 21o (v0.9.6) 亮度/透明度：☀ 面板改值 → 应用到卡片 + 持久化；重开卡片沿用 ---
+  {
+    const pD = await openPage({ localSeed: { displayBrightness: 120, displayOpacity: 60 } });
+    await pushState(pD, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(900);
+    const applied = await pD.evaluate(() => {
+      const c = window.__fomoDebotTestHandle.shadow.querySelector('.card');
+      return { filter: c.style.filter, opacity: c.style.opacity };
+    });
+    // 动一下 ☀ 滑块
+    const afterSlide = await pD.evaluate(() => {
+      const sh = window.__fomoDebotTestHandle.shadow;
+      const ranges = sh.querySelectorAll('.display-range');   // [0]=亮度 [1]=透明度
+      const o = ranges[1];
+      o.value = '35'; o.dispatchEvent(new Event('input', { bubbles: true }));
+      const c = sh.querySelector('.card');
+      return { opacity: c.style.opacity, n: ranges.length };
+    });
+    const stored = await pD.evaluate(() => new Promise((r) => chrome.storage.local.get({ displayOpacity: null }, (v) => r(v.displayOpacity))));
+    await pD.close();
+    step('步骤 21o · 亮度/透明度应用到卡片并持久化', [
+      chk('载入的亮度 120% 应用为 filter', /brightness\(120%\)/.test(applied.filter), applied.filter),
+      chk('载入的透明度 60% 应用为 opacity 0.6', applied.opacity === '0.6', applied.opacity),
+      chk('拖 ☀ 到 35% → opacity 0.35', afterSlide.opacity === '0.35', afterSlide.opacity),
+      chk('透明度写入 storage.local', stored === 35, stored),
+    ]);
+  }
+
+  // --- 21p (v0.9.6) 圆钮可拖动 + 位置持久化 ---
+  {
+    const pL = await openPage({ syncSeed: { openMode: 'off' }, localSeed: {} });
+    await pushState(pL, `/tokens/robinhood/${PONS_CA}`);
+    await sleep(700);
+    const before = await pL.evaluate(() => {
+      const l = window.__fomoDebotTestHandle.shadow.querySelector('.launcher');
+      const r = l.getBoundingClientRect();
+      return { visible: !l.hidden, x: r.left + r.width / 2, y: r.top + r.height / 2, left: Math.round(r.left), top: Math.round(r.top) };
+    });
+    await pL.mouse.move(before.x, before.y);
+    await pL.mouse.down();
+    await pL.mouse.move(before.x - 200, before.y - 150, { steps: 6 });
+    await pL.mouse.up();
+    await sleep(200);
+    const moved = await pL.evaluate(() => { const r = window.__fomoDebotTestHandle.shadow.querySelector('.launcher').getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top) }; });
+    const storedPos = await pL.evaluate(() => new Promise((r) => chrome.storage.local.get({ launcherPos: null }, (v) => r(v.launcherPos))));
+    // 拖完那一下不该被当成"打开卡片"
+    const stillClosed = await pL.evaluate(() => window.__fomoDebotTestHandle.state.open);
+    await pL.close();
+    step('步骤 21p · 圆钮可拖动、记住位置、拖完不误开卡', [
+      chk('圆钮初始可见（off 模式）', before.visible === true, before.visible),
+      chk('拖动后位置变了', moved.left !== before.left || moved.top !== before.top, [before, moved]),
+      chk('位置写入 launcherPos', !!storedPos && Number.isFinite(storedPos.left), storedPos),
+      chk('拖完这一下没把卡片打开', stillClosed === false, stillClosed),
+    ]);
+  }
+
+  // --- 21n (v0.9.6) fomo 界面切中文/日文：所有锚点换成译文（词表来自 fomo 语言包）→ 照常抓到 ---
+  for (const [loc, dict] of [
+    ['zh', { hold: '平均持仓 2天4小时', Trader: '交易者', Position: '持仓', PnL: '盈亏', 'Avg. entry': '平均买入价', Thesis: '观点', 'Holders (128)': '持有者 (128)', Swaps: '交易', 'Thesis (4,933)': '观点 (255)', 'Friends only': '仅看好友', 'Thesis only': '仅看观点', Alerts: '通知', 'Market cap': '市值' }],
+    ['ja', { hold: '平均保有 22時間4分', Trader: 'トレーダー', Position: 'ポジション', PnL: '損益', 'Avg. entry': '平均買値', Thesis: '考察', 'Holders (128)': '保有者 (128)', Swaps: '取引', 'Thesis (4,933)': '考察 (255)', 'Friends only': '友達のみ', 'Thesis only': '考察のみ', Alerts: '通知', 'Market cap': '時価総額' }],
+  ]) {
+    await page.evaluate((dict) => {
+      // 把页面上所有英文锚点文本节点换成译文（不加 Chrome 翻译的标记——这是 fomo 自己的语言）
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      window.__l10nSaved = [];
+      for (const n of nodes) {
+        const v = n.nodeValue; let nv = v;
+        nv = nv.replace(/\b\d+d \d+h avg\. hold\b/g, dict.hold);
+        for (const k of ['Holders (128)', 'Thesis (4,933)', 'Friends only', 'Thesis only', 'Avg. entry', 'Market cap', 'Trader', 'Position', 'PnL', 'Thesis', 'Swaps', 'Alerts']) {
+          if (k in dict) nv = nv.replace(new RegExp('\\b' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), dict[k]);
+        }
+        if (nv !== v) { window.__l10nSaved.push([n, v]); n.nodeValue = nv; }
+      }
+      document.documentElement.lang = Object.keys(dict).length ? (dict.Thesis === '观点' ? 'zh' : 'ja') : 'en';
+    }, dict);
+    await pushState(page, `/tokens/robinhood/${loc === 'zh' ? SLOW_CA : PONS_CA}`);
+    await sleep(1400);
+    const l = await snap(page);
+    const dl = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
+    await page.evaluate(() => { for (const [n, v] of window.__l10nSaved) n.nodeValue = v; document.documentElement.lang = 'en'; });
+    step(`步骤 21n-${loc} · fomo 界面为 ${loc}：锚点全是译文 → Holders/Thesis 照常抓到`, [
+      chk('Holders 6 行', l.kolRows === 6, [l.kolRows, dl.holdAnchors, dl.holderRows]),
+      chk('Thesis 3 条', l.thesisRows === 3, l.thesisRows),
+      chk('持有时长显示译文单位', /持有 (2天4小时|22時間4分)|held (2天4小时|22時間4分)/.test(l.kolText), l.kolText.slice(0, 80)),
+      chk('diag: thesisCol=true, bottomTab=holders, friendsOnly=false', dl.thesisCol === true && dl.bottomTab === 'holders' && dl.friendsOnly === false, [dl.thesisCol, dl.bottomTab, dl.friendsOnly]),
+      chk('diag pageLang 记录', dl.pageLang === loc, dl.pageLang),
+    ]);
+  }
+
   // --- 21c 慢页面：卡片必须等 fomo 渲染完再出场，不许弹在一片黑上 ---
   //（主人截图里的第一个症状：卡片比 fomo 自己的 React 还快，背景全黑、两段全灰字）
   {
@@ -1758,12 +1901,14 @@ try {
   const pop = await browser.newPage();
   await pop.setViewport({ width: 340, height: 660 });
   await pop.evaluateOnNewDocument(() => {
-    const store = {};
+    const store = {}; const local = {};
+    const mkArea = (b) => ({
+      get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in b) ? b[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
+      set(o, cb) { Object.assign(b, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+      remove(k, cb) { const arr = Array.isArray(k) ? k : [k]; for (const x of arr) delete b[x]; if (cb) setTimeout(cb, 0); return Promise.resolve(); },
+    });
     window.chrome = {
-      storage: { sync: {
-        get(keys, cb) { const out = {}; if (keys && typeof keys === 'object') for (const k in keys) out[k] = (k in store) ? store[k] : keys[k]; if (cb) setTimeout(() => cb(out), 0); return Promise.resolve(out); },
-        set(o, cb) { Object.assign(store, o); if (cb) setTimeout(cb, 0); return Promise.resolve(); },
-      } },
+      storage: { sync: mkArea(store), local: mkArea(local) },
       permissions: { request: () => Promise.resolve(true), contains: () => Promise.resolve(true) },
     };
   });
@@ -2056,15 +2201,15 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.5', mf.version === '0.9.5', mf.version),
+    chk('版本号为 0.9.6', mf.version === '0.9.6', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions 只有 storage',
       Array.isArray(mf.permissions) && mf.permissions.join(',') === 'storage', mf.permissions),
     chk('固定公钥在位（扩展 ID 恒定）', typeof mf.key === 'string' && mf.key.length > 300, !!mf.key),
-    chk('固定 host 授权 = DeBot + FxTwitter + DexScreener 四个公网 https 源，不多一个',
+    chk('固定 host 授权 = DeBot + FxTwitter + DexScreener + GitHub(版本检测) 五个公网 https 源，不多一个',
       Array.isArray(mf.host_permissions)
-      && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*,https://api.dexscreener.com/*',
+      && mf.host_permissions.join(',') === 'https://app.debot.ai/*,https://debot.ai/*,https://api.fxtwitter.com/*,https://api.dexscreener.com/*,https://api.github.com/*',
       mf.host_permissions),
     chk('内容脚本仍只注入 fomo.family',
       mf.content_scripts[0].matches.join(',') === 'https://fomo.family/*', mf.content_scripts[0].matches),

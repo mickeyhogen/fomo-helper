@@ -44,6 +44,7 @@
     openMode: 'compact',
     hoverPreview: true,
     lang: 'zh',
+    updateCheck: true,      // v0.9.6：每 6 小时查一次 GitHub 最新版（可关）
     // 公开版：不含自定义分析源，相关设置键一概不读（K3 审查 F5）
   };
 
@@ -69,6 +70,8 @@
     zh: {
       copyCa: '复制合约地址', pin: '固定卡片', langBtn: '切换译文语言', refresh: '重新抓取', close: '关闭',
       dragHint: '拖动移动卡片；双击回到默认大小和位置', docked: '已回到默认大小和位置',
+      displayBtn: '调节亮度和透明度', brightness: '亮度', opacity: '透明度',
+      updateReady: '有新版', updateHint: '点开 GitHub 发布页下载新版；解压覆盖同一文件夹后回扩展页点 ↻',
       resizeHint: '拖动调整卡片大小（会记住）',
       preview: '预览', launcher: 'Fomo放大镜：查看当前代币的叙事/观点/持仓', copied: '已复制',
       notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
@@ -100,6 +103,8 @@
     en: {
       copyCa: 'Copy contract address', pin: 'Pin card', langBtn: 'Switch language', refresh: 'Refresh', close: 'Close',
       dragHint: 'Drag to move; double-click to reset size and position', docked: 'Back to default size and position',
+      displayBtn: 'Brightness & opacity', brightness: 'Brightness', opacity: 'Opacity',
+      updateReady: 'Update', updateHint: 'Open the GitHub releases page; unzip over the same folder, then hit ↻ on the extensions page',
       resizeHint: 'Drag to resize (remembered)',
       preview: 'preview', launcher: 'Fomo Helper: narrative / theses / holders of this token', copied: 'Copied',
       notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
@@ -161,7 +166,34 @@
   const TWEET_SHOW = 1;       // 推文只直出 1 条，其余收进 details
   const TWEET_CLAMP = 110;    // ≈2 行
   const MEME_CLAMP = 120;     // meme 点：一句话笑话，超了给展开
-  const SCRAPE_HOLD_RE = /avg\.?\s*hold/i; // 持仓行的锚点文案
+  // ---------- fomo 界面 6 语种锚点（v0.9.6，词表抠自 fomo 自己的 Lingui 语言包，非猜测） ----------
+  // 主人朋友 scar：fomo 账号语言=中文时页面全是"交易者/持仓/盈亏/平均持仓/仅看好友"，英文锚点一个都对不上。
+  // 拉丁词加 \b 词界，CJK 直接子串；每个词组合成一个联合正则，下面所有解析点统一用它。
+  const L10N = {
+    hold:        ['avg\\.?\\s*hold', '平均持仓', '平均保有', 'Ø\\s*Haltedauer', 'de media por posición', 'Détention moy\\.'],
+    trader:      ['Traders?', '交易者', 'トレーダー'],
+    position:    ['Positions?', '持仓', 'ポジション', 'Positionen', 'Posici(?:ón|ones)'],
+    pnl:         ['PnL', '盈亏', '損益'],
+    entry:       ['Avg\\.?\\s*entry', '平均买入价', '平均買値', 'Ø\\s*Einstieg', 'Entrada prom\\.?', 'Moy\\.\\s*entrée'],
+    thesis:      ['Thesis', '观点', '考察', 'These', 'Tesis', 'Thèse'],
+    holders:     ['Holders', '持有者', '保有者', 'Halter', 'Détenteurs'],
+    swaps:       ['Swaps', '交易', '取引'],
+    friendsOnly: ['Friends\\s*only', '仅看好友', '友達のみ', 'Nur Freunde', 'Solo amigos', 'Amis uniquement'],
+    thesisOnly:  ['Thesis\\s*only', '仅看观点', '考察のみ', 'Nur Thesen', 'Solo tesis', 'Thèses uniquement'],
+    alerts:      ['Alerts', '通知', 'Alertas', 'Alertes'],
+    marketCap:   ['Market\\s*cap', '市值', '時価総額', 'Marktkap\\.', 'Cap\\. de mercado', 'Capitalisation'],
+    justNow:     ['just now', '刚刚', 'たった今', 'Gerade eben', 'Justo ahora', 'À l’instant', 'À l\'instant'],
+  };
+  const isLatin = (w) => /^[A-Za-z\\\\]/.test(w) || /^[ÀÉÈÊÔÙ]/.test(w) || /^Ø/.test(w);
+  const alt = (list, exact) => '(?:' + list.map((w) => (isLatin(w) && !exact ? '\\b' + w + '\\b' : w)).join('|') + ')';
+  const rx = (key, flags, exact) => new RegExp(alt(L10N[key], exact), flags || '');
+  // 时长/相对时间单位：en(mo|d|h|m|s|w) + 中(天|小时|分钟|秒|周|个月) + 日(日|時間|分|秒|週|ヶ月) + 德(Tag|Tage|Std\.|Min\.|Mon\.) + 西/法(h|min|j|d|mes|meses|mois)
+  const DUR_UNIT = '(?:mo|[dhmsw]|天|小时|分钟|秒|周|个月|日|時間|分|週|ヶ月|Tage?|Std\\.?|Min\\.?|Mon\\.?|min|mes(?:es)?|mois|j)';
+  const DUR_RUN = '(?:\\d+\\s*' + DUR_UNIT + '\\s*)+';
+  const SCRAPE_HOLD_RE = rx('hold', 'i');            // 持仓行的锚点文案（联合）
+  const SCRAPE_HOLD_G = rx('hold', 'gi');
+  // "2d 4h avg. hold"（英）或 "平均持仓 22小时4分钟"（中/日/德/法，锚点在前）
+  const HOLD_DUR_RE = new RegExp('(' + DUR_RUN + ')\\s*' + alt(L10N.hold) + '|' + alt(L10N.hold) + '\\s*[:：]?\\s*(' + DUR_RUN + ')', 'i');
   const URL_IN_TEXT_RE = /https:\/\/[^\s<>"'）)】]+/g;
 
   // verdict.label → 颜色档
@@ -180,7 +212,12 @@
   let grip = null;         // 右下角尺寸手柄
   let shadow = null;       // closed ShadowRoot
   let card = null;         // 卡片根节点
-  let launcher = null;     // "叙" 圆钮
+  let launcher = null;     // 圆钮（v0.9.6 可拖动）
+  let launcherPos = null;  // {left, top} —— 拖过就记住
+  let launcherWasDragged = false;
+  let displayBrightness = 100;  // 亮度 50–150（friend 功能移植）
+  let displayOpacity = 100;     // 透明度 35–100
+  let updateInfo = null;        // {tag, url, newer:boolean} —— 版本检测结果
   let els = null;          // 卡片内常用节点引用
   let savedPos = null;     // {left, top}
   let savedSize = null;    // {w, h} —— 拖过尺寸就记住（v0.9.3）
@@ -359,7 +396,8 @@
       });
     } catch (_) { if (cb) cb(); }
     try {
-      chrome.storage.local.get({ cardPos: null, cardSize: null, translatorReady: false }, (v) => {
+      chrome.storage.local.get({ cardPos: null, cardSize: null, launcherPos: null,
+        displayBrightness: 100, displayOpacity: 100, translatorReady: false }, (v) => {
         if (v && v.cardSize && validSize(v.cardSize)) {   // K3 #8：NaN/负数/天文数字一律当没存过
           savedSize = { w: v.cardSize.w, h: v.cardSize.h };
           if (card) applySize();
@@ -368,6 +406,14 @@
           savedPos = { left: v.cardPos.left, top: v.cardPos.top };
           if (card) applyPos();
         }
+        if (v && v.launcherPos && Number.isFinite(v.launcherPos.left) && Number.isFinite(v.launcherPos.top)) {
+          launcherPos = { left: v.launcherPos.left, top: v.launcherPos.top };
+          if (launcher) applyLauncherPos();
+        }
+        displayBrightness = Math.min(150, Math.max(50, Number(v && v.displayBrightness) || 100));
+        displayOpacity = Math.min(100, Math.max(35, Number(v && v.displayOpacity) || 100));
+        if (card) applyDisplayAppearance();
+        checkUpdate();
         // 语言包此前下过 → 以后不必再点"译"，自动开。
         // 这个回调可能晚于首屏渲染，所以到货后重跑一次自动判定。
         translation.autoFlag = !!(v && v.translatorReady);
@@ -382,6 +428,13 @@
   function watchSettings() {
     try {
       chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes) {   // v0.9.6：popup 设置项/卡片 ☀ 改亮度透明度 → 双向同步
+          let disp = false;
+          if ('displayBrightness' in changes) { displayBrightness = Math.min(150, Math.max(50, Number(changes.displayBrightness.newValue) || 100)); disp = true; }
+          if ('displayOpacity' in changes) { displayOpacity = Math.min(100, Math.max(35, Number(changes.displayOpacity.newValue) || 100)); disp = true; }
+          if (disp) applyDisplayAppearance();
+          return;
+        }
         if (area !== 'sync' || !changes) return;
         let langChanged = false;
         let sourceChanged = false;
@@ -390,6 +443,7 @@
           if (k in DEFAULTS) {
             settings[k] = changes[k].newValue;
             if (k === 'lang') langChanged = true;
+            if (k === 'updateCheck') checkUpdate();
             if (k === 'openMode') openModeChanged = true;
             if (k === 'analysisTemplate' || k === 'detailTemplate'
               || k === 'allowPrivateAnalysisSource') sourceChanged = true;
@@ -503,6 +557,11 @@
 .chip.pv { color: #ffb454; border-color: rgba(255,180,84,.4); background: rgba(255,180,84,.08); }
 /* v0.8.3：类型 chip 右侧的池子交易对 chips（DexScreener），挤不下就整组裁切 */
 .pairs { display: flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* v0.9.6：段标题行支持右侧挂件（副池 chips） */
+details > summary:has(.sum-t) { display: flex; align-items: center; gap: 6px; }
+.sum-t { flex: 0 0 auto; }
+.sum-sp { flex: 1 1 auto; }
+.pairs-solo { display: flex; justify-content: flex-end; margin: 0 0 6px; }
 .pairchip { font-size: 10px; color: #8fbaff; background: rgba(91,156,255,.08);
             border: 1px solid rgba(91,156,255,.25); border-radius: 999px; padding: 0 6px;
             white-space: nowrap; line-height: 1.6; flex: 0 0 auto; }
@@ -530,7 +589,11 @@
         color: #8a8f99; font-size: 10.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-all;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: text; }
 .card.resizing { user-select: none; }
+.byfoot { display: flex; align-items: center; gap: 4px; }
+.byfoot-sp { flex: 1 1 auto; }
 .byfoot a { color: #6a6e76; text-decoration: none; }
+.upd { order: -1; margin-right: auto; color: #ffb454 !important; font-weight: 600; }
+.upd:hover { color: #ffd08a !important; text-decoration: underline; }
 .byfoot a:hover { color: #9aa0aa; text-decoration: underline; }
 .body {
   /* v0.7.3：页脚整段移除后，正文底 padding 补到 10px，最后一段收口不贴边 */
@@ -573,6 +636,13 @@ details:not([open]) > summary::before { content: "▸ "; }
   cursor: pointer; z-index: 2147482999; box-shadow: 0 6px 20px rgba(0,0,0,.45);
 }
 .launcher:hover { color: #fff; border-color: #4a4d54; }
+/* v0.9.6 亮度/透明度面板 */
+.display-panel { flex: 0 0 auto; background: #131417; border-bottom: 1px solid #1e2024;
+                padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.display-panel label { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #9aa0aa; }
+.display-lbl { flex: 0 0 40px; }
+.display-range { flex: 1 1 auto; accent-color: #5b9cff; }
+.display-val { flex: 0 0 38px; text-align: right; color: #cfd2d8; font-variant-numeric: tabular-nums; }
 .toast { position: fixed; right: 18px; bottom: 64px; background: #17181c; color: #cfd2d8;
          border: 1px solid #2c2f35; border-radius: 8px; padding: 6px 10px; font-size: 12px;
          z-index: 2147483001; }
@@ -686,6 +756,21 @@ details.tweets > summary { color: #9aa0aa; }
       cls: 'btn lang', attrs: { type: 'button' }, title: tr('langBtn'),
       on: { click: toggleLang },
     }, [langZh, langSep, langEn, langBusy]);
+    const displayBtn = h('button', {
+      cls: 'btn icon', text: '☀', attrs: { type: 'button' }, title: tr('displayBtn'),
+      on: { click: (e) => { e.stopPropagation(); displayPanel.hidden = !displayPanel.hidden; } },
+    });
+    const brightnessVal = h('span', { cls: 'display-val', text: displayBrightness + '%' });
+    const opacityVal = h('span', { cls: 'display-val', text: displayOpacity + '%' });
+    const brightnessInput = h('input', { cls: 'display-range', attrs: { type: 'range', min: '50', max: '150', step: '5', value: String(displayBrightness) } });
+    const opacityInput = h('input', { cls: 'display-range', attrs: { type: 'range', min: '35', max: '100', step: '5', value: String(displayOpacity) } });
+    const displayPanel = h('div', { cls: 'display-panel' }, [
+      h('label', {}, [h('span', { cls: 'display-lbl', text: tr('brightness') }), brightnessInput, brightnessVal]),
+      h('label', {}, [h('span', { cls: 'display-lbl', text: tr('opacity') }), opacityInput, opacityVal]),
+    ]);
+    displayPanel.hidden = true;
+    brightnessInput.addEventListener('input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
+    opacityInput.addEventListener('input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
     const refreshBtn = h('button', {
       cls: 'btn icon', text: '↻', attrs: { type: 'button' }, title: tr('refresh'),
       on: { click: () => { if (state.ca) { load(state.ca, state.chain, state.mode, true); rescanNow(true); } } },
@@ -703,9 +788,9 @@ details.tweets > summary { color: #9aa0aa; }
     const pairsWrap = h('span', { cls: 'pairs' });
     pairsWrap.hidden = true;
     const pvChip = h('span', { cls: 'chip pv', text: tr('preview') });
-    const hdrTop = h('div', { cls: 'hdr-top' }, [name, pairsWrap, pvChip,
+    const hdrTop = h('div', { cls: 'hdr-top' }, [name, pvChip,
       h('span', { cls: 'spacer' }),
-      h('div', { cls: 'hdr-acts' }, [caBtn, pinBtn, langBtn, refreshBtn, closeBtn])]);
+      h('div', { cls: 'hdr-acts' }, [caBtn, pinBtn, langBtn, displayBtn, refreshBtn, closeBtn])]);
     const starRow = h('div', { cls: 'hdr-stars' }, [stars]);
     starRow.hidden = true;
     const hdr = h('div', { cls: 'hdr' }, [hdrTop, starRow]);
@@ -750,13 +835,14 @@ details.tweets > summary { color: #9aa0aa; }
     const body = h('div', { cls: 'body' }, [paneNarrative, paneViews, paneHolders]);
     // v0.8.9：页尾只有一行署名（v0.7.3 撤掉的信息页脚不回来）。
     const byfoot = h('div', { cls: 'byfoot' }, [
+      h('span', { cls: 'byfoot-sp' }),
       h('span', { text: 'By ' }),
       h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
         attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo放大镜 · Fomo Helper — by @0xHogen' } }),
     ]);
     grip = h('div', { cls: 'grip', title: tr('resizeHint') });
     grip.addEventListener('mousedown', onResizeStart);
-    card = h('div', { cls: 'card' }, [hdr, tabs, body, byfoot, grip]);
+    card = h('div', { cls: 'card' }, [hdr, displayPanel, tabs, body, byfoot, grip]);
     card.hidden = true;
     card.addEventListener('mouseenter', () => { cancelHide(); rescanNow(); });
     card.addEventListener('mouseleave', () => { if (state.mode === 'preview') scheduleHide(); });
@@ -767,16 +853,20 @@ details.tweets > summary { color: #9aa0aa; }
       title: tr('launcher'),
       on: { click: onLauncherClick },
     });
+    launcher.addEventListener('mousedown', onLauncherDragStart);   // v0.9.6 可拖动
 
     shadow.appendChild(card);
     shadow.appendChild(launcher);
     document.documentElement.appendChild(host);
 
     els = { name, caBtn, pinBtn, langBtn, refreshBtn, closeBtn, langZh, langEn, langSep, langBusy, stars, starRow,
-            pairsWrap, pvChip, hdr, body, tabBtns,
+            pairsWrap, pvChip, hdr, body, tabBtns, displayBtn, displayPanel, byfoot,
+            brightnessInput, opacityInput, brightnessVal, opacityVal,
             paneNarrative, paneViews, paneHolders,
             slotDebot, slotDebotTail, slotThesis, slotAnalysis, slotKol, slotTweets };
     applySize();   // 记住过的尺寸先贴上；内部会调 applyPos 定位（v0.9.3）
+    applyLauncherPos();
+    applyDisplayAppearance();
   }
 
   /**
@@ -791,7 +881,7 @@ details.tweets > summary { color: #9aa0aa; }
       const cands = document.querySelectorAll('button, [role="tab"], a, span');
       for (const el of cands) {
         const t = el.textContent || '';
-        if (t.length <= 12 && t.trim() === 'Alerts') { anchor = el; break; }
+        if (t.length <= 12 && rx('alerts', '', true).test(t.trim()) && new RegExp('^' + alt(L10N.alerts, true) + '$').test(t.trim())) { anchor = el; break; }
       }
       if (!anchor) return null;
       let node = anchor;
@@ -828,7 +918,7 @@ details.tweets > summary { color: #9aa0aa; }
       if (findLeftPanel()) return true;
       const t = document.body ? (document.body.innerText || '') : '';
       if (t.length > PAGE_READY_MIN_TEXT) return true;
-      if (t.indexOf('Market cap') !== -1) return true;
+      if (rx('marketCap', 'i').test(t)) return true;
     } catch (_) { /* 判不出就当没好 */ }
     return false;
   }
@@ -998,6 +1088,57 @@ details.tweets > summary { color: #9aa0aa; }
     toast(tr('docked'));
   }
 
+  // ---------- 版本检测（v0.9.6，主人定：每 6 小时、默认开） ----------
+  function localVersion() {
+    try { return String(chrome.runtime.getManifest().version || '0'); } catch (_) { return '0'; }
+  }
+
+  /** 版本号比较：a<b 返回 -1。只认数字段，"v" 前缀与后缀（如 0.9.5.3）都容得下。 */
+  function cmpVersion(a, b) {
+    const pa = String(a).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+    const pb = String(b).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] || 0, y = pb[i] || 0;
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function checkUpdate() {
+    if (!settings.updateCheck) { updateInfo = null; renderUpdateNotice(); return; }
+    try {
+      chrome.runtime.sendMessage({ type: 'version-check' }, (resp) => {
+        try { if (chrome.runtime.lastError) return; } catch (_) { return; }
+        if (!resp || !resp.ok || !resp.payload || !resp.payload.tag) return;
+        const tag = resp.payload.tag;
+        updateInfo = {
+          tag,
+          url: resp.payload.link || resp.payload.url || RELEASE_PAGE,   // 发布说明里贴了推特就跳推特
+          gist: resp.payload.gist || '',
+          newer: cmpVersion(localVersion(), tag) < 0,
+        };
+        renderUpdateNotice();
+      });
+    } catch (_) { /* 忽略 */ }
+  }
+
+  const RELEASE_PAGE = 'https://github.com/mickeyhogen/fomo-helper/releases/latest';
+
+  /** 有新版就在页尾左侧挂一行小字；没有就清掉。不弹窗、不挡内容。 */
+  function renderUpdateNotice() {
+    if (!els || !els.byfoot) return;
+    const old = els.byfoot.querySelector('.upd');
+    if (old) old.remove();
+    if (!updateInfo || !updateInfo.newer) return;
+    const a = h('a', {
+      cls: 'upd', text: tr('updateReady') + ' ' + updateInfo.tag + ' ↗',
+      href: updateInfo.url || RELEASE_PAGE,
+      attrs: { target: '_blank', rel: 'noopener noreferrer' },
+      title: (updateInfo.gist ? updateInfo.gist + '\n\n' : '') + tr('updateHint'),
+    });
+    els.byfoot.insertBefore(a, els.byfoot.firstChild);
+  }
+
   // ---------- 诊断（v0.9.4：远程排查用，空态时才出现） ----------
   function buildDiag() {
     const d = {};
@@ -1009,17 +1150,18 @@ details.tweets > summary { color: #9aa0aa; }
     let bodyText = '';
     try { bodyText = document.body ? (document.body.innerText || '') : ''; } catch (_) {}
     d.pageText = bodyText.length;
-    d.holdAnchors = (bodyText.match(/avg\.?\s*hold/gi) || []).length;
+    d.holdAnchors = (bodyText.match(SCRAPE_HOLD_G) || []).length;
     try { d.holderRows = collectHolderRows().length; } catch (_) { d.holderRows = -1; }
     try { d.thesisCol = !!findThesisColumn(); } catch (_) { d.thesisCol = null; }
     d.bottomTab = fomoBottomTab();
     d.friendsOnly = friendsOnlyActive();
     d.translated = pageTranslated();
     d.htmlClass = String(document.documentElement.className || '').slice(0, 40) || '-';
+    d.pageLang = document.documentElement.lang || '-';   // fomo 自己的界面语言（Lingui 会写到 <html lang>）
     d.cjk = (bodyText.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
     // 表区附近 100 字样本：锚点全没时，看一眼就知道文案变成了什么语言
     try {
-      const i = bodyText.search(/Holders|Traders|Trader|Position|持有|持仓|保有/);
+      const i = bodyText.search(new RegExp(alt(L10N.holders) + '|' + alt(L10N.trader) + '|' + alt(L10N.position)));
       d.sample = (i >= 0 ? bodyText.slice(i, i + 100) : bodyText.slice(0, 100)).replace(/\s+/g, ' ');
     } catch (_) { d.sample = ''; }
     d.holders = state.holders && state.holders.status;
@@ -1038,7 +1180,7 @@ details.tweets > summary { color: #9aa0aa; }
       'text=' + d.pageText + ' holdAnchors=' + d.holdAnchors
         + ' holderRows=' + d.holderRows + ' thesisCol=' + d.thesisCol,
       'bottomTab=' + d.bottomTab + ' friendsOnly=' + d.friendsOnly + ' translated=' + d.translated
-        + ' html=' + d.htmlClass + ' cjk=' + d.cjk,
+        + ' html=' + d.htmlClass + ' pageLang=' + d.pageLang + ' cjk=' + d.cjk,
       'holders=' + d.holders + ' thesis=' + d.thesis + ' lastScan=' + d.lastScan + ' observer=' + d.observer,
       'sample=' + d.sample,
     ].join('\n');
@@ -1134,6 +1276,7 @@ details.tweets > summary { color: #9aa0aa; }
     els.langBusy.textContent = tr('trBusy');
     els.pvChip.textContent = tr('preview');
     if (grip) grip.setAttribute('title', tr('resizeHint'));
+    if (els.displayBtn) els.displayBtn.setAttribute('title', tr('displayBtn'));
     if (launcher) launcher.setAttribute('title', tr('launcher'));
   }
 
@@ -1152,8 +1295,70 @@ details.tweets > summary { color: #9aa0aa; }
 
 
   function onLauncherClick() {
+    if (launcherWasDragged) { launcherWasDragged = false; return; }   // 刚拖完的那一下 click 不当"打开"
     if (urlToken) load(urlToken.ca, urlToken.chain, 'url', false);
     else toast(tr('notToken'));
+  }
+
+  /** 圆钮位置（拖过才有）；钳在视口内。 */
+  function applyLauncherPos() {
+    if (!launcher || !launcherPos) return;
+    const maxL = Math.max(0, window.innerWidth - 46);
+    const maxT = Math.max(0, window.innerHeight - 46);
+    launcherPos.left = Math.min(Math.max(0, launcherPos.left), maxL);
+    launcherPos.top = Math.min(Math.max(0, launcherPos.top), maxT);
+    launcher.style.left = launcherPos.left + 'px';
+    launcher.style.top = launcherPos.top + 'px';
+    launcher.style.right = 'auto';
+    launcher.style.bottom = 'auto';
+  }
+
+  function onLauncherDragStart(e) {
+    if (e.button !== 0 || !launcher) return;
+    const rect = launcher.getBoundingClientRect();
+    const x0 = e.clientX, y0 = e.clientY, left0 = rect.left, top0 = rect.top;
+    let moved = false;
+    const move = (ev) => {
+      if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 4) moved = true;
+      if (!moved) return;
+      launcherPos = {
+        left: Math.min(Math.max(0, left0 + ev.clientX - x0), Math.max(0, window.innerWidth - 46)),
+        top: Math.min(Math.max(0, top0 + ev.clientY - y0), Math.max(0, window.innerHeight - 46)),
+      };
+      applyLauncherPos();
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      window.removeEventListener('blur', up);
+      launcherWasDragged = moved;
+      if (moved) { try { chrome.storage.local.set({ launcherPos }); } catch (_) { /* 忽略 */ } }
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+    window.addEventListener('blur', up, { once: true });
+    e.preventDefault();
+  }
+
+  /** 应用亮度/透明度到卡片，并把滑块 UI 同步到当前值。 */
+  function applyDisplayAppearance() {
+    if (card) {
+      card.style.filter = displayBrightness === 100 ? '' : 'brightness(' + displayBrightness + '%)';
+      card.style.opacity = displayOpacity === 100 ? '' : String(displayOpacity / 100);
+    }
+    if (els && els.brightnessInput) {
+      els.brightnessInput.value = String(displayBrightness);
+      els.opacityInput.value = String(displayOpacity);
+      els.brightnessVal.textContent = displayBrightness + '%';
+      els.opacityVal.textContent = displayOpacity + '%';
+    }
+  }
+
+  function updateDisplayAppearance(brightness, opacity) {
+    displayBrightness = Math.min(150, Math.max(50, Number(brightness) || 100));
+    displayOpacity = Math.min(100, Math.max(35, Number(opacity) || 100));
+    applyDisplayAppearance();
+    try { chrome.storage.local.set({ displayBrightness, displayOpacity }); } catch (_) { /* 忽略 */ }
   }
 
   function closeCard() {
@@ -1377,6 +1582,15 @@ details.tweets > summary { color: #9aa0aa; }
     const show = syms.slice(0, PAIR_SHOW);
     wrap.hidden = !show.length;
     if (!show.length) return;
+    // 起源段不存在时（没叙事/读取失败）chips 会没爹——兜底挂到 Meta 页顶部一行
+    if (!wrap.isConnected && els.slotDebot) {
+      let solo = els.slotDebot.querySelector('.pairs-solo');
+      if (!solo) {
+        solo = h('div', { cls: 'pairs-solo' });
+        els.slotDebot.insertBefore(solo, els.slotDebot.firstChild);
+      }
+      solo.appendChild(wrap);
+    }
     for (const s of show) wrap.appendChild(h('span', { cls: 'pairchip', text: '$' + s }));
     if (syms.length > show.length) {
       wrap.appendChild(h('span', { cls: 'pairchip more', text: '+' + (syms.length - show.length) }));
@@ -1490,12 +1704,15 @@ details.tweets > summary { color: #9aa0aa; }
    * v0.6：DeBot 段内容一条不少，但默认展开状态分层——
    * 结论先露出（评级理由/起源默认展开），细节收起（传播/开发者点开即看）。
    */
-  function sectionNode(title, kids, cls, collapsed) {
+  function sectionNode(title, kids, cls, collapsed, rightNode) {
     const real = (kids || []).filter(Boolean);
     if (!real.length) return null;
     const attrs = collapsed ? {} : { open: '' };
-    const d = h('details', { cls: cls || '', attrs },
-      [h('summary', { text: title })].concat(real));
+    // v0.9.6：rightNode 挂在 summary 右端（副池 chips 从拥挤的头部挪到「起源」这一行）
+    const sum = rightNode
+      ? h('summary', {}, [h('span', { cls: 'sum-t', text: title }), h('span', { cls: 'sum-sp' }), rightNode])
+      : h('summary', { text: title });
+    const d = h('details', { cls: cls || '', attrs }, [sum].concat(real));
     return d;
   }
 
@@ -1535,7 +1752,7 @@ details.tweets > summary { color: #9aa0aa; }
 
     // 起源（默认展开）
     const bg = story.background || {};
-    add(sectionNode(tr('secOrigin'), [fieldNode('', bg.origin)]));
+    add(sectionNode(tr('secOrigin'), [fieldNode('', bg.origin)], '', false, els.pairsWrap));
 
     // 评级理由（默认展开）。位置排在起源之后，但仍保留蓝色高亮框——
     // 它是全段唯一的"判断"，视觉权重不能因为排第二就掉下去。
@@ -1906,7 +2123,7 @@ details.tweets > summary { color: #9aa0aa; }
     return v;
   }
 
-  const holdCount = (t) => (String(t || '').match(/avg\.?\s*hold/gi) || []).length;
+  const holdCount = (t) => (String(t || '').match(SCRAPE_HOLD_G) || []).length;
 
   /** 数据行必须自带作者锚（profile 链接 / 头像），表头与汇总行没有，天然被挡在外面。 */
   function hasRowAnchor(row) {
@@ -2022,8 +2239,8 @@ details.tweets > summary { color: #9aa0aa; }
     const cells = rowCells(row);
     let head = cells.length ? cells[0] : String(flat || '');
     head = head
-      .replace(/[\d]+\s*[dhms](?:\s*[\d]+\s*[dhms])?\s*avg\.?\s*hold/ig, ' ')
-      .replace(/\bavg\.?\s*hold\b/ig, ' ')
+      .replace(new RegExp(DUR_RUN + '\\s*' + alt(L10N.hold) + '|' + alt(L10N.hold) + '\\s*[:：]?\\s*' + DUR_RUN, 'ig'), ' ')
+      .replace(SCRAPE_HOLD_G, ' ')
       .replace(/\bTeam\b/g, ' ');
     for (const tok of head.split(/[\s|·,]+/)) {
       const t = tok.replace(/^@/, '');
@@ -2065,7 +2282,8 @@ details.tweets > summary { color: #9aa0aa; }
     }
 
     // 时长单位放宽到 mo/w（"1mo avg. hold" 这种老持有人以前会解析成空）
-    const holdM = flat.match(/([\d]+\s*(?:mo|[dhmsw])(?:\s*[\d]+\s*(?:mo|[dhmsw]))?)\s*avg\.?\s*hold/i);
+    const holdRaw = flat.match(HOLD_DUR_RE);
+    const holdM = holdRaw ? [holdRaw[0], (holdRaw[1] || holdRaw[2] || '').trim()] : null;
     const avgHold = holdM ? oneLine(holdM[1]) : '';
 
     // 至少要有仓位或盈亏才算一行有效数据
@@ -2131,11 +2349,11 @@ details.tweets > summary { color: #9aa0aa; }
   // 那里，所以"刚刚能抓、现在抓不到"。真正 token-specific 的 thesis 长在 Holders 表的
   // "Thesis" 列里（每个持有人对这只币写下的观点）。两个抓取器共用同一张 Holders 表，
   // 懒加载晚到时靠同一个 MutationObserver 一起被接住。
-  const COL_TRADER_RE = /\bTrader\b/;
-  const COL_POSITION_RE = /\bPosition\b/;
-  const COL_PNL_RE = /\bPnL\b/i;
-  const COL_ENTRY_RE = /\bAvg\.?\s*entry\b/i;
-  const COL_THESIS_RE = /\bThesis\b/;
+  const COL_TRADER_RE = rx('trader');
+  const COL_POSITION_RE = rx('position');
+  const COL_PNL_RE = rx('pnl', 'i');
+  const COL_ENTRY_RE = rx('entry', 'i');
+  const COL_THESIS_RE = rx('thesis');
   // traderCellName 会用到这几个（保留）
   const TIMEISH_RE = /^\d+\s*[smhdw]$/i;
   const PRICEISH_RE = /^[$＄]?[\d,.]+\s*[KMB%]?$/i;
@@ -2191,8 +2409,8 @@ details.tweets > summary { color: #9aa0aa; }
       let raw;
       try { raw = el.textContent || ''; } catch (_) { continue; }
       if (!raw || raw.length > 200) continue;   // 列头很短；跳过大容器，别去读整张表
-      if (raw.indexOf('Trader') === -1 || raw.indexOf('Position') === -1
-        || raw.indexOf('Thesis') === -1 || !/Avg\.?\s*entry/i.test(raw)) continue;
+      if (!COL_TRADER_RE.test(raw) || !COL_POSITION_RE.test(raw)
+        || !COL_THESIS_RE.test(raw) || !COL_ENTRY_RE.test(raw)) continue;
       const t = oneLine(cleanText(el));   // innerText：块级单元格间会带空格，词界判定才准
       if (!COL_TRADER_RE.test(t) || !COL_POSITION_RE.test(t)
         || !COL_ENTRY_RE.test(t) || !COL_THESIS_RE.test(t)) continue;
@@ -2204,7 +2422,8 @@ details.tweets > summary { color: #9aa0aa; }
       }
       if (!innermost) continue;
       const cells = rowCellEls(el).map((c) => oneLine(cleanText(c)));
-      const idx = cells.findIndex((c) => /^Thesis$/i.test(c.trim()));
+      const thesisCellRe = new RegExp('^' + alt(L10N.thesis, true) + '$', 'i');
+    const idx = cells.findIndex((c) => thesisCellRe.test(c.trim()));
       if (idx === -1) continue;
       return { len: cells.length, thesisIdx: idx };
     }
@@ -2272,17 +2491,24 @@ details.tweets > summary { color: #9aa0aa; }
   // "有就配、配不上就不显示"：按 作者 + 正文前缀 双条件对号，宁缺毋错。
   /** fomo 的相对时间（"2h"/"9m"/"3d"/"just now"）→ 分钟数；解析不出返回 null。 */
   function relAgeMinutes(t) {
-    const str = String(t || '').trim().toLowerCase();
+    const str = String(t || '').trim().replace(/\s*(前|ago)\s*$/, '');
     if (!str) return null;
-    if (str === 'just now') return 0;
-    const m = /^(\d+)\s*(mo|[smhdw])$/.exec(str);
+    if (rx('justNow', 'i', true).test(str)) return 0;
+    const m = new RegExp('^(\\d+)\\s*(' + DUR_UNIT + ')$', 'i').exec(str);
     if (!m) return null;
-    const mult = { s: 1 / 60, m: 1, h: 60, d: 1440, w: 10080, mo: 43200 }[m[2]];
-    return parseInt(m[1], 10) * mult;
+    const u = m[2].toLowerCase();
+    const mult = /^(s|秒)$/.test(u) ? 1 / 60
+      : /^(m|min|分钟|分|min\.)$/.test(u) ? 1
+      : /^(h|小时|時間|std\.?)$/.test(u) ? 60
+      : /^(d|天|日|tage?|j)$/.test(u) ? 1440
+      : /^(w|周|週)$/.test(u) ? 10080
+      : /^(mo|个月|ヶ月|mon\.?|mes|meses|mois)$/.test(u) ? 43200 : null;
+    return mult == null ? null : parseInt(m[1], 10) * mult;
   }
 
-  const COMMENT_HEAD_RE = /^(@?[A-Za-z0-9_.\-]{2,25}) Thesis (\d+\s?(?:mo|[smhdw])|just now)\b/;
-  const COMMENT_HEAD_G = /(?:^|\s)@?[A-Za-z0-9_.\-]{2,25} Thesis (?:\d+\s?(?:mo|[smhdw])|just now)\b/g;
+  const AGE_TOKEN = '(?:\\d+\\s*' + DUR_UNIT + '(?:\\s*(?:前|ago))?|' + alt(L10N.justNow, true) + ')';
+  const COMMENT_HEAD_RE = new RegExp('^(@?[A-Za-z0-9_.\\-]{2,25})\\s+' + alt(L10N.thesis) + '\\s+(' + AGE_TOKEN + ')(?![A-Za-z])');
+  const COMMENT_HEAD_G = new RegExp('(?:^|\\s)@?[A-Za-z0-9_.\\-]{2,25}\\s+' + alt(L10N.thesis) + '\\s+' + AGE_TOKEN + '(?![A-Za-z])', 'g');
 
   /**
    * fomo 自家 Thesis 评论流（主人开过那个 tab 才渲染进 DOM）：一条评论 =
@@ -2294,13 +2520,32 @@ details.tweets > summary { color: #9aa0aa; }
     const out = [];
     let all;
     try { all = document.body ? document.body.querySelectorAll('*') : []; } catch (_) { return out; }
+    // v0.9.6 真页面 scar：左栏那条是**全局活动流**（所有币混着滚，还混 Buy/Sell），
+    // 它的条目长得和底部 Thesis 标签一模一样（"handle Thesis 3m"），扫全文档会把别的币的
+    // 评论当成本币的，"最新"档于是永远对不上号。实测坐标：左栏 x≈65 w≈214，底部面板 x≈353 w≈806。
+    // 以左栏容器为准排除；容器认不出时退回宽度/位置兜底。
+    // 注意：findLeftPanel() 返回的是 DOMRect，不是元素——别对它调 .contains（会抛，
+    // 然后被 catch 吞掉，连带下面的几何判定一起失效。v0.9.6 就栽在这上面。）
+    let panelRect = null;
+    try { panelRect = findLeftPanel(); } catch (_) { panelRect = null; }
+    const inLeftPanel = (el) => {
+      let r;
+      try { r = el.getBoundingClientRect(); } catch (_) { return false; }
+      if (!r || !r.width) return false;
+      const cx = r.left + r.width / 2;
+      // ① 水平中心落在左栏矩形内 ② 兜底：又窄又靠左（左栏 w≈214/280，主面板 w≈806）
+      if (panelRect && cx >= panelRect.left - 4 && cx <= panelRect.right + 4) return true;
+      if (r.width < 300 && r.left < window.innerWidth * LEFT_ZONE_RATIO) return true;
+      return false;
+    };
     const seenRows = [];
     for (const el of all) {
       let raw;
       try { raw = el.textContent || ''; } catch (_) { continue; }
-      if (!raw || raw.length > 300 || raw.indexOf('Thesis') === -1) continue;
+      if (!raw || raw.length > 300 || !COL_THESIS_RE.test(raw)) continue;
       const head = oneLine(cleanText(el));
       if (!COMMENT_HEAD_RE.test(head)) continue;
+      if (inLeftPanel(el)) continue;   // 左栏全局流：不是当前币的评论
       let innermost = true;
       for (const c of el.children) {
         if (COMMENT_HEAD_RE.test(oneLine(cleanText(c)))) { innermost = false; break; }
@@ -2438,7 +2683,7 @@ details.tweets > summary { color: #9aa0aa; }
     let carriers = [];
     try {
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-        acceptNode: (n) => (/^\s*friends\s*only\s*$/i.test(n.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+        acceptNode: (n) => (new RegExp('^\\s*' + alt(L10N.friendsOnly, true) + '\\s*$', 'i').test(n.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
       });
       let n;
       while ((n = walker.nextNode())) {
@@ -2447,7 +2692,7 @@ details.tweets > summary { color: #9aa0aa; }
         let pick = null;
         for (let i = 0; i < 3 && el && el !== document.body; i++) {
           const t = (el.textContent || '').trim();
-          if (!/^friends\s*only$/i.test(t)) break;
+          if (!new RegExp('^' + alt(L10N.friendsOnly, true) + '$', 'i').test(t)) break;
           if (hasStateControl(el)) { pick = el; break; }
           el = el.parentElement;
         }
@@ -2466,7 +2711,7 @@ details.tweets > summary { color: #9aa0aa; }
           if (sib === el) continue;
           let st;
           try { st = (sib.textContent || '').trim(); } catch (_) { continue; }
-          if (/^thesis\s*only$/i.test(st)) return c;
+          if (new RegExp('^' + alt(L10N.thesisOnly, true) + '$', 'i').test(st)) return c;
         }
         el = el.parentElement;
       }
@@ -2522,6 +2767,10 @@ details.tweets > summary { color: #9aa0aa; }
     return false;
   }
 
+  const TAB_HOLDERS_RE = new RegExp('^' + alt(L10N.holders, true) + '(?:\\s*\\(|\\s*$)');
+  const TAB_SWAPS_RE = new RegExp('^' + alt(L10N.swaps, true) + '(?:\\s*\\(|\\s*$)');
+  const TAB_THESIS_RE = new RegExp('^' + alt(L10N.thesis, true) + '(?:\\s*\\(|\\s*$)');
+
   function fomoBottomTab() {
     try {
       // 候选：文案像 Holders / Swaps / Thesis 的按钮
@@ -2530,9 +2779,10 @@ details.tweets > summary { color: #9aa0aa; }
         const t = (b.textContent || '').trim();
         if (t.length > 25) continue;
         let key = null;
-        if (/^Holders\b/.test(t)) key = 'holders';
-        else if (/^Swaps\b/.test(t)) key = 'swaps';
-        else if (/^Thesis\s*\(/.test(t) || t === 'Thesis') key = 'thesis';
+        // 标签文案 = 词本身，后面只允许空格/括号计数（"交易" 是 Swaps，"交易者" 是 Traders——必须整词匹配）
+        if (TAB_HOLDERS_RE.test(t)) key = 'holders';
+        else if (TAB_SWAPS_RE.test(t)) key = 'swaps';
+        else if (TAB_THESIS_RE.test(t)) key = 'thesis';
         if (key) cands.push({ key, b });
       }
       if (cands.length < 2) return null;
@@ -3448,6 +3698,7 @@ details.tweets > summary { color: #9aa0aa; }
           analysis: state.analysis.status,
           holders: state.holders.status,
           thesis: state.thesis.status,
+          feed: ((state.thesis && state.thesis.feed) || []).map((f) => f && (f.handle || f.author || '')),
           tweets: state.tweets.status,
           translator: translation.status,
           translating: translation.on,

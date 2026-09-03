@@ -58,6 +58,7 @@ Holders 表里每个持有人对这只币写下的 thesis：按点赞降序全�
 | `fomo.family` 页面 DOM | Thesis 与 Holders | 零网络：只读页面上已渲染的内容，不碰你的登录态 |
 | `api.fxtwitter.com` | 叙事来源推文正文 | 公开只读，不登录、不发帖 |
 | `api.dexscreener.com` | 副池交易对 chips | 公开只读，不登录、无 key |
+| `api.github.com` | 版本检测（每 6 小时，可关） | 公开只读，不登录、无 key，不发送页面/代币信息 |
 
 公开版没有"自定义数据源"这个功能：那意味着扩展要替你去访问一个任意地址，公开发布后就是别人做内网探测的入口。所以设置里没有这一项，代码里没有对应请求路径，manifest 里也不申请任何通配域名权限。详见 [PRIVACY.md](PRIVACY.md)。
 

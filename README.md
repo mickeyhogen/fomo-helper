@@ -58,6 +58,7 @@ Fetching the narrative, tweets and pools does query three third-party public end
 | `fomo.family` page DOM | Thesis and Holders | zero network: reads already-rendered content, never your session |
 | `api.fxtwitter.com` | source tweet text | public read-only, no login, no posting |
 | `api.dexscreener.com` | secondary-pool pair chips | public read-only, no login, no key |
+| `api.github.com` | update check (every 6 h, can be turned off) | public read-only, no login, no key, sends no page or token data |
 
 There is no "custom data source" feature in the public build: that would mean the extension fetching an arbitrary address on your behalf — once published, an entry point for internal-network probing. So the setting doesn't exist, the request path doesn't exist, and the manifest requests no wildcard host permissions. Details in [PRIVACY.md](PRIVACY.md).
 

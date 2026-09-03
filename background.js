@@ -296,7 +296,50 @@ async function handlePairs(msg) {
 // 路由
 // ---------------------------------------------------------------------------
 
+/**
+ * v0.9.6 版本检测：查 GitHub 最新 release，6 小时缓存一次。
+ * 只读公开 API、不带任何凭证；这是本扩展第 5 个外部端点，已写进隐私说明。
+ */
+const RELEASE_URL = 'https://api.github.com/repos/mickeyhogen/fomo-helper/releases/latest';
+const VERSION_TTL_MS = 6 * 60 * 60 * 1000;   // 主人定：每 6 小时
+const VERSION_CACHE_KEY = 'updateCheckCache';
+
+async function handleVersion(msg) {
+  try {
+    if (!msg || !msg.force) {
+      const got = await chrome.storage.local.get({ [VERSION_CACHE_KEY]: null });
+      const c = got && got[VERSION_CACHE_KEY];
+      if (c && typeof c.tag === 'string' && Date.now() - Number(c.at || 0) < VERSION_TTL_MS) {
+        return { ok: true, payload: { tag: c.tag, url: c.url || '', link: c.link || c.url || '', gist: c.gist || '', cached: true } };
+      }
+    }
+    const r = await fetchJson(RELEASE_URL, 8000);
+    if (r.stage !== 'json' || !r.json) return { ok: false, kind: 'network' };
+    const tag = String(r.json.tag_name || '').trim();
+    if (!tag) return { ok: false, kind: 'network' };
+    const url = String(r.json.html_url || '').trim();
+    const body = String(r.json.body || '');
+    // 发布说明里贴了推特链接就优先跳那条推（主人引流用）；没贴则回落 GitHub 发布页。
+    // 只认 https 的 x.com / twitter.com 状态链接，别的一律不跟。
+    const tw = body.match(/https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,20}\/status\/\d{5,25}/);
+    const link = tw ? tw[0] : url;
+    // 首行摘要：跳过标题/空行/markdown 记号，取第一句人话，截断 90 字
+    let gist = '';
+    for (const raw of body.split(/\r?\n/)) {
+      const t = raw.replace(/^[\s>*_#-]+/, '').replace(/\*\*/g, '').trim();
+      if (!t || /^https?:\/\//i.test(t) || t.length < 6) continue;
+      gist = t.slice(0, 90); break;
+    }
+    const payload = { tag, url, link, gist, cached: false };
+    try { await chrome.storage.local.set({ [VERSION_CACHE_KEY]: Object.assign({ at: Date.now() }, payload) }); } catch (_) { /* 忽略 */ }
+    return { ok: true, payload };
+  } catch (_) {
+    return { ok: false, kind: 'network' };
+  }
+}
+
 const ROUTES = {
+  'version-check': handleVersion,
   'debot-story': handleStory,
   // 公开版不含分析源：保留路由名只为让前端那一段安静地降级，绝不发任何请求。
   'analysis-doc': async () => ({ ok: false, kind: 'disabled' }),
