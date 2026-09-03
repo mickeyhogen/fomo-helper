@@ -44,8 +44,6 @@ Rest the mouse on a row in the left Alerts / Feed panel for 0.6 s and a preview 
 
 Auto-open mode (compact / full / off), default language and the hover-preview switch live in the extension icon's settings panel. That's all — no account, no login, nothing to fill in. `中/EN` in the card header switches language any time.
 
-The card itself is adjustable too: **drag the header to move it, drag the bottom-right grip to resize it — both position and size are remembered**; double-click the header to reset them.
-
 ![Settings panel](test/screenshots/23-settings-openmode.png)
 
 ## What it can and cannot touch
