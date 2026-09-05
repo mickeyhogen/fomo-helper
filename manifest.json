@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fomo Lens",
-  "version": "0.9.21",
+  "version": "0.9.22",
   "description": "在 Fomo、GMGN 和 XXYY 查看代币叙事、Fomo 观点与持仓。支持 XXYY 新旧界面；读取 Fomo 数据需在同一浏览器登录。By @0xHogen",
   "permissions": [
     "storage",

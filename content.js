@@ -189,7 +189,7 @@
       displayBtn: '调节亮度和透明度', brightness: '亮度', opacity: '透明度',
       updateReady: '有新版', updateHint: '点开 GitHub 发布页下载新版；解压覆盖同一文件夹后回扩展页点 ↻',
       resizeHint: '拖动调整卡片大小（会记住）',
-      preview: '预览', launcher: '打开 Fomo Lens', launcherHint: '点击展开 · 拖动移位', copied: '已复制',
+      preview: '预览', launcher: '重新打开 Fomo Lens', launcherHint: '点击恢复当前代币 · 拖动移位', copied: '已复制',
       notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
       source: '↗ 来源', resolvingToken: '正在识别当前代币…', resolveTokenFailed: '暂时无法识别这个池子的代币，点击 ↻ 重试', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
       nostory: 'DeBot 还没有这只币的叙事记录', openDebot: '在 DeBot 打开 ↗', retry: '重试',
@@ -232,7 +232,7 @@
       displayBtn: 'Brightness & opacity', brightness: 'Brightness', opacity: 'Opacity',
       updateReady: 'Update', updateHint: 'Open the GitHub releases page; unzip over the same folder, then hit ↻ on the extensions page',
       resizeHint: 'Drag to resize (remembered)',
-      preview: 'preview', launcher: 'Open Fomo Lens', launcherHint: 'Click to open · Drag to move', copied: 'Copied',
+      preview: 'preview', launcher: 'Reopen Fomo Lens', launcherHint: 'Open current token · Drag to move', copied: 'Copied',
       notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
       source: '↗ source', resolvingToken: 'Identifying this token…', resolveTokenFailed: 'Could not identify the token in this pool. Press ↻ to retry.', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
       nostory: 'DeBot has no narrative for this token yet', openDebot: 'Open on DeBot ↗', retry: 'Retry',
@@ -569,6 +569,8 @@
         s.openMode = resolveOpenMode(v || {});
         delete s.autoOpen;
         settings = s;
+        // A manual-mode launcher may already exist before async settings arrive.
+        paintStaticI18n();
         if (cb) cb();
       });
     } catch (_) { if (cb) cb(); }
@@ -635,7 +637,10 @@
             openModeChanged = true;
           }
         }
-        if (langChanged && state.status === 'ready') applyLangChange();
+        if (langChanged) {
+          paintStaticI18n();
+          if (state.status === 'ready') applyLangChange();
+        }
         // openMode 即时生效：重排当前已开的卡片（compact/full 折叠态随之变化）
         if (openModeChanged && state.open && state.ca && !sourceChanged) {
           load(state.ca, state.chain, state.mode, false);
@@ -846,29 +851,40 @@ details:not([open]) > summary::before { content: "▸ "; }
         border: 2px solid #2a2d33; border-top-color: #5b9cff; animation: sp .8s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 .launcher {
-  position: fixed; right: 16px; bottom: 76px; width: 44px; height: 44px; padding: 0;
-  display: grid; place-items: center; border-radius: 15px;
-  background: linear-gradient(145deg, #222b35, #12171f); border: 1px solid #405368;
-  color: #a9d6ff; cursor: pointer; z-index: 2147483646;
-  box-shadow: 0 5px 18px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
-  transition: border-color .16s, background .16s, box-shadow .16s;
+  position: fixed; right: 12px; top: 44vh; width: 116px; height: 40px; padding: 0 12px;
+  display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 20px;
+  background: linear-gradient(135deg, #1e2e3b, #111a23); border: 1px solid #4c718f;
+  color: #baddf7; cursor: pointer; z-index: 2147483647; user-select: none; touch-action: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.08);
+  transition: border-color .16s, background .16s, box-shadow .16s, color .16s;
 }
 .launcher:hover, .launcher:focus-visible { color: #dcefff; border-color: #80baff;
   box-shadow: 0 5px 22px rgba(0,0,0,.5), 0 0 0 3px rgba(104,176,255,.12); }
 .launcher:focus-visible { outline: 2px solid #a9d6ff; outline-offset: 3px; }
-.lens-mark { width: 15px; height: 15px; box-sizing: border-box; border: 2px solid currentColor;
+.launcher-label { font-size: 12px; font-weight: 600; letter-spacing: .1px; white-space: nowrap; pointer-events: none; }
+.launcher.just-closed { animation: lens-arrive .22s ease-out; }
+.launcher.dragging { cursor: grabbing; border-color: #a9d6ff; }
+@keyframes lens-arrive { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+.lens-mark { width: 14px; height: 14px; flex: 0 0 14px; box-sizing: border-box; border: 2px solid currentColor;
   border-radius: 50%; position: relative; margin: -3px 3px 0 0; pointer-events: none; }
 .lens-mark::after { content: ''; position: absolute; width: 7px; height: 2px;
   background: currentColor; border-radius: 2px; right: -6px; bottom: -3px; transform: rotate(45deg); }
-.launcher-tip { position: absolute; right: 54px; top: 50%; transform: translateY(-50%);
+.launcher-tip { position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%);
   padding: 9px 12px; background: #19212b; border: 1px solid #354658; border-radius: 10px;
   white-space: nowrap; text-align: left; color: #e2edf8; box-shadow: 0 4px 16px rgba(0,0,0,.35);
   opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .16s; }
 .launcher-tip strong { display: block; font-size: 12px; font-weight: 500; }
 .launcher-tip small { display: block; margin-top: 3px; color: #8fa4b8; font-size: 10px; }
-.launcher.tip-right .launcher-tip { left: 54px; right: auto; }
+.launcher.tip-right .launcher-tip { left: calc(100% + 10px); right: auto; }
+.launcher.tip-below .launcher-tip { position: fixed; left: 50%; right: auto; top: auto;
+  bottom: 16px; transform: translateX(-50%); max-width: calc(100vw - 24px); white-space: normal; }
 .launcher:hover .launcher-tip, .launcher:focus-visible .launcher-tip { opacity: 1; visibility: visible; }
-@media (prefers-reduced-motion: reduce) { .launcher, .launcher-tip { transition: none; } }
+.launcher.dragging .launcher-tip { opacity: 0; visibility: hidden; }
+@media (max-width: 520px) { .launcher-tip, .launcher.tip-right .launcher-tip {
+  position: fixed; left: 50%; right: auto; top: auto; bottom: 16px; transform: translateX(-50%);
+  max-width: calc(100vw - 24px); white-space: normal;
+} }
+@media (prefers-reduced-motion: reduce) { .launcher, .launcher.just-closed, .launcher-tip { transition: none; animation: none; } }
 /* v0.9.6 亮度/透明度面板 */
 .display-panel { flex: 0 0 auto; background: #131417; border-bottom: 1px solid #1e2024;
                 padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -1103,11 +1119,12 @@ details.tweets > summary { color: #9aa0aa; }
       cls: 'launcher', attrs: { type: 'button', 'aria-label': tr('launcher'), 'aria-expanded': 'false' },
       on: { click: onLauncherClick },
     }, [h('span', { cls: 'lens-mark', attrs: { 'aria-hidden': 'true' } }),
+      h('span', { cls: 'launcher-label', text: 'Fomo Lens', attrs: { 'aria-hidden': 'true' } }),
       h('span', { cls: 'launcher-tip', attrs: { 'aria-hidden': 'true' } }, [
         h('strong', { text: tr('launcher') }), h('small', { text: tr('launcherHint') }),
       ]),
     ]);
-    listen(launcher, 'mousedown', onLauncherDragStart);   // v0.9.6 可拖动
+    listen(launcher, 'pointerdown', onLauncherDragStart);
 
     shadow.appendChild(card);
     shadow.appendChild(launcher);
@@ -1210,7 +1227,7 @@ details.tweets > summary { color: #9aa0aa; }
   function showCardNow() {
     if (!card) return;
     card.hidden = false;
-    if (launcher) launcher.hidden = true;
+    if (launcher) { launcher.hidden = true; launcher.classList.remove('just-closed'); launcher.setAttribute('aria-expanded', 'true'); }
     applyPos(); // 面板可能刚渲染出来，这时候算停靠位才准
   }
 
@@ -1581,6 +1598,7 @@ details.tweets > summary { color: #9aa0aa; }
       launcher.setAttribute('aria-label', tr('launcher'));
       launcher.querySelector('strong').textContent = tr('launcher');
       launcher.querySelector('small').textContent = tr('launcherHint');
+      if (!launcher.hidden) applyLauncherPos();
     }
   }
 
@@ -1598,59 +1616,79 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
 
-  function onLauncherClick() {
-    if (launcherWasDragged) { launcherWasDragged = false; return; }   // 刚拖完的那一下 click 不当"打开"
+  function onLauncherClick(e) {
+    // Touch taps activate on pointerup; ignore the optional compatibility click.
+    if (e.pointerType === 'touch') return;
+    if (launcherWasDragged && e.detail !== 0) { launcherWasDragged = false; return; }
+    launcherWasDragged = false;
     const current = parsePath(location.pathname);
     if (current) { urlToken = current; openFromUrl(current); }
     else if (lastClosedToken) openToken(lastClosedToken, 'manual');
     else toast(tr('notToken'));
+    // An explicit click should reveal immediately, even while a route or data is loading.
+    if (state.open) { clearReveal(); showCardNow(); rescanNow(true); }
   }
 
   /** 圆钮位置（拖过才有）；钳在视口内。 */
   function applyLauncherPos() {
     if (!launcher) return;
-    const maxL = Math.max(8, window.innerWidth - 52);
-    const maxT = Math.max(8, window.innerHeight - 52);
+    const width = launcher.offsetWidth || 116, height = launcher.offsetHeight || 40;
+    const maxL = Math.max(8, window.innerWidth - width - 8);
+    const maxT = Math.max(8, window.innerHeight - height - 8);
     if (!launcherPos) {
-      launcher.style.left = ''; launcher.style.top = '';
-      launcher.style.right = '16px'; launcher.style.bottom = Math.min(76, Math.max(8, innerHeight - 52)) + 'px';
-      launcher.classList.remove('tip-right');
-      return;
+      launcher.style.left = ''; launcher.style.top = Math.min(maxT, Math.max(8, Math.round(innerHeight * .44))) + 'px';
+      launcher.style.right = '12px'; launcher.style.bottom = 'auto';
+    } else {
+      launcherPos.left = Math.min(Math.max(8, launcherPos.left), maxL);
+      launcherPos.top = Math.min(Math.max(8, launcherPos.top), maxT);
+      launcher.style.left = launcherPos.left + 'px';
+      launcher.style.top = launcherPos.top + 'px';
+      launcher.style.right = 'auto';
+      launcher.style.bottom = 'auto';
     }
-    launcherPos.left = Math.min(Math.max(8, launcherPos.left), maxL);
-    launcherPos.top = Math.min(Math.max(8, launcherPos.top), maxT);
-    launcher.style.left = launcherPos.left + 'px';
-    launcher.style.top = launcherPos.top + 'px';
-    launcher.style.right = 'auto';
-    launcher.style.bottom = 'auto';
-    launcher.classList.toggle('tip-right', launcherPos.left < 220);
+    launcher.classList.remove('tip-right', 'tip-below');
+    const tipWidth = launcher.querySelector('.launcher-tip').offsetWidth || 240;
+    const left = launcher.getBoundingClientRect().left;
+    const fitsLeft = left >= tipWidth + 12;
+    const fitsRight = innerWidth - left - width >= tipWidth + 12;
+    launcher.classList.toggle('tip-right', !fitsLeft && fitsRight);
+    launcher.classList.toggle('tip-below', !fitsLeft && !fitsRight);
   }
 
   function onLauncherDragStart(e) {
-    if (e.button !== 0 || !launcher) return;
+    if (e.button !== 0 || !e.isPrimary || !launcher) return;
+    launcherWasDragged = false;
     const rect = launcher.getBoundingClientRect();
     const x0 = e.clientX, y0 = e.clientY, left0 = rect.left, top0 = rect.top;
     let moved = false;
     const move = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
       if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 4) moved = true;
       if (!moved) return;
+      launcher.classList.add('dragging');
       launcherPos = {
-        left: Math.min(Math.max(0, left0 + ev.clientX - x0), Math.max(0, window.innerWidth - 46)),
-        top: Math.min(Math.max(0, top0 + ev.clientY - y0), Math.max(0, window.innerHeight - 46)),
+        left: left0 + ev.clientX - x0,
+        top: top0 + ev.clientY - y0,
       };
       applyLauncherPos();
     };
-    const up = () => {
-      window.removeEventListener('mousemove', move, true);
-      window.removeEventListener('mouseup', up, true);
+    const up = (ev) => {
+      if (ev.pointerId !== undefined && ev.pointerId !== e.pointerId) return;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
       window.removeEventListener('blur', up);
-      launcherWasDragged = moved;
+      launcher.classList.remove('dragging');
+      launcherWasDragged = moved && ev.type === 'pointerup';
       if (moved) { try { chrome.storage.local.set({ [SK.launcher]: launcherPos }); } catch (_) { /* 忽略 */ } }
+      if (!moved && e.pointerType === 'touch' && ev.type === 'pointerup') onLauncherClick({ detail: 0 });
     };
-    listen(window, 'mousemove', move, true);
-    listen(window, 'mouseup', up, true);
+    listen(window, 'pointermove', move, true);
+    listen(window, 'pointerup', up, true);
+    listen(window, 'pointercancel', up, true);
     listen(window, 'blur', up, { once: true });
-    e.preventDefault();
+    // Pointer capture keeps a touch drag attached to the small control.
+    try { launcher.setPointerCapture(e.pointerId); } catch (_) { /* Detached pointer. */ }
   }
 
   /** 应用亮度/透明度到卡片，并把滑块 UI 同步到当前值。 */
@@ -1699,7 +1737,12 @@ details.tweets > summary { color: #9aa0aa; }
     clearReveal();
     stopScrapers();
     if (card) card.hidden = true;
-    if (launcher) { launcher.hidden = false; applyLauncherPos(); }
+    if (launcher) {
+      launcher.hidden = false;
+      launcher.setAttribute('aria-expanded', 'false');
+      launcher.classList.add('just-closed');
+      applyLauncherPos();
+    }
   }
 
   function scheduleHide() {

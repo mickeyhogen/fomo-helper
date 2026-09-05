@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.9.22 — 2026-09-05
+
+### English
+
+- Reopening is easier to find: closing the card leaves a compact, labeled **Fomo Lens** button on the right. Click it to reopen the current token immediately without refreshing the page.
+- The button can be dragged with a mouse or touch, remembers its position, stays inside the viewport after resizing, and explains its action on hover or keyboard focus. Reduced-motion preferences are respected.
+- **XXYY compatibility: the reopen button follows the current token in both classic and new layouts, including pool-address pages and manual opening mode.**
+- **GMGN compatibility: closing with the close button, Escape or a click outside leaves the same entry for reopening the current token.**
+- Chinese and English launcher text now updates even while the card is closed or its data is loading.
+
+Upgrade: overwrite the extension folder and reload the extension. Existing settings are retained.
+
+### 中文
+
+- 关闭后的入口更好找：卡片收起后，右侧保留带 **Fomo Lens** 名称的小浮钮。点击立即恢复当前代币卡片，无需刷新网页。
+- 浮钮支持鼠标和触屏拖动、记住位置；窗口缩小后仍完整留在屏幕内。悬停或键盘聚焦可查看操作提示，并遵循减少动态效果的系统偏好。
+- **XXYY 兼容更新：新旧界面都可通过浮钮重新打开当前代币，兼容池子地址页面和手动打开模式。**
+- **GMGN 兼容更新：点击关闭、按 Esc 或点击卡片外部后，均保留重新打开当前代币的入口。**
+- 修复卡片关闭或数据加载中切换语言时，浮钮提示未同步更新的问题。
+
+升级：覆盖扩展目录后，在扩展管理页重新加载；已有设置保留。
+
 ## v0.9.21 — 2026-09-05
 
 ### English

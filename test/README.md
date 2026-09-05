@@ -50,3 +50,7 @@ behavior when GitHub is stale, unavailable or returns an unexpected asset URL.
 These fixtures do not prove that an upstream site's current live private account
 view works. Release acceptance also checks live token pages separately. A visible
 card alone is insufficient: narrative and Fomo fields must contain actual content.
+
+### Reopen entry acceptance
+
+Run `FOMO_EXTENSION_DIR=<unpacked-release>/fomo-helper FOMO_TEST_OUTPUT=<output-dir> node test/run-installed-launcher.mjs`. This uses a real MV3 installation and trusted mouse/keyboard/touch input. It covers closing by ×, Escape and outside click; a labeled, visible and hit-tested reopen entry; repeated reopening without refreshing; current-CA routing in both XXYY layouts and manual mode; dragging, viewport resize, language and reduced-motion settings. A DOM `hidden` flag or programmatic `.click()` alone is not acceptance. Real-site checks supplement these deterministic fixtures.

@@ -18,14 +18,14 @@ try{
   p.on('request',req=>{
    if(!req.url().startsWith('https://api.github.com/'))return req.continue();
    if(mode==='offline')return req.abort();
-   const tag=mode==='stale'?'v0.9.8':'v0.9.22';
+   const tag=mode==='stale'?'v0.9.8':'v0.9.23';
    req.respond({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify({tag_name:tag,draft:false,prerelease:false,assets:[{name:'fomo-helper-'+tag+'.zip',browser_download_url:mode==='untrusted'?'https://example.com/download.zip':asset(tag)}]})});
   });
   for(const width of mode==='stale'?[1280,375]:[1280]){
    await p.setViewport({width,height:900});
    for(const lang of mode==='stale'?['zh','en']:['en']){
     await p.goto('http://127.0.0.1:'+server.address().port+'/?lang='+lang,{waitUntil:'networkidle0'});
-    const expected=mode==='valid'?'v0.9.22':'v0.9.21';
+    const expected=mode==='valid'?'v0.9.23':'v0.9.22';
     const s=await p.evaluate(()=>({lang:document.documentElement.lang,title:document.title,href:document.querySelector('#dl').href,zh:document.querySelector('#dl .zh').textContent,en:document.querySelector('#dl .en').textContent,version:document.querySelector('#ver').textContent,width:innerWidth,scroll:document.documentElement.scrollWidth,images:[...document.images].every(x=>x.complete&&x.naturalWidth>0),text:document.body.innerText}));
     check(mode+' '+width+' '+lang+' download and both labels agree',s.href===asset(expected)&&s.zh.includes(expected)&&s.en.includes(expected)&&s.version.includes(expected),s.href);
     check(mode+' '+width+' '+lang+' layout and images render',s.scroll<=width&&s.images,{width,scroll:s.scroll,images:s.images});

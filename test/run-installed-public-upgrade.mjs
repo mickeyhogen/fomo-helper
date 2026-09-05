@@ -28,7 +28,7 @@ const server=https.createServer({key:fs.readFileSync(temp+'/key'),cert:fs.readFi
  const u=new URL(req.url,'https://'+req.headers.host);hits.push({host:u.hostname,path:u.pathname});
  const reply=(v,type='application/json')=>{res.writeHead(200,{'content-type':type,'cache-control':'no-store'});res.end(typeof v==='string'?v:JSON.stringify(v));};
  if(u.hostname==='fomo.family')return reply(fixture,'text/html');
- if(u.hostname==='api.github.com')return reply({tag_name:'v0.9.22',html_url:'https://github.com/mickeyhogen/fomo-helper/releases/tag/v0.9.22',body:'- Next stable release for testing.'});
+ if(u.hostname==='api.github.com')return reply({tag_name:'v0.9.23',html_url:'https://github.com/mickeyhogen/fomo-helper/releases/tag/v0.9.23',body:'- Next stable release for testing.'});
  if(u.pathname==='/api/v1/nitter/story/latest')return reply(story);
  return reply({pairs:[]});
 });
@@ -48,7 +48,7 @@ try{
  browser=await pp.launch({executablePath:'/usr/bin/chromium',headless:'new',enableExtensions:true,protocolTimeout:15000,userDataDir:temp+'/profile',acceptInsecureCerts:true,args:['--no-sandbox','--disable-dev-shm-usage','--no-proxy-server','--ignore-certificate-errors',`--disable-extensions-except=${install}`,`--load-extension=${install}`,'--host-resolver-rules='+hosts.map(h=>`MAP ${h} 127.0.0.1:${server.address().port}`).join(', ')]});
  let sw=await(await browser.waitForTarget(t=>t.type()==='service_worker')).worker();
  const original=await sw.evaluate(async()=>{await chrome.storage.sync.set({openMode:'full',lang:'en',hoverPreview:true,updateCheck:false,analysisTemplate:'https://legacy-analysis.example/{ca}',detailTemplate:'https://legacy-analysis.example/{ca}',allowPrivateAnalysisSource:true});await chrome.storage.local.set({displayBrightness:111,displayOpacity:67});return {id:chrome.runtime.id,version:chrome.runtime.getManifest().version};});
- check('baseline is the previous public release',original.version==='0.9.8',original);
+ check('baseline is the previous public release',original.version===JSON.parse(fs.readFileSync(PREVIOUS+'/manifest.json')).version,original);
  const p=await browser.newPage();await p.setViewport({width:1280,height:900});p.on('pageerror',e=>errors.push(e.message));
  await p.goto('https://fomo.family/tokens/robinhood/'+CA,{waitUntil:'domcontentloaded'});
  await until(()=>shadow(p,'return !this.querySelector(".card").hidden;'));
@@ -60,7 +60,7 @@ try{
  const wake=await browser.newPage();await wake.goto('chrome-extension://'+original.id+'/popup.html');
  console.log('Inspect reloaded extension through its own settings page');
  const now=await wake.evaluate(async()=>({id:chrome.runtime.id,manifest:chrome.runtime.getManifest(),sync:await chrome.storage.sync.get(['openMode','lang','hoverPreview','updateCheck']),local:await chrome.storage.local.get(['displayBrightness','displayOpacity']),permissions:await chrome.permissions.getAll()}));
- check('upgrade keeps the fixed extension ID and loads v0.9.21',now.id===original.id&&now.manifest.version==='0.9.21');
+ check('upgrade keeps the fixed extension ID and loads v0.9.22',now.id===original.id&&now.manifest.version===JSON.parse(fs.readFileSync(EXT+'/manifest.json')).version);
  check('language, open mode, hover, update and appearance settings survive',now.sync.hoverPreview===true&&now.sync.lang==='en'&&now.sync.openMode==='full'&&now.sync.updateCheck===false&&now.local.displayBrightness===111&&now.local.displayOpacity===67,now);
  check('new site access is available without wildcard optional permissions',now.permissions.origins.length===9&&!now.manifest.optional_host_permissions&&['https://gmgn.ai/*','https://pro.xxyy.io/*','https://www.xxyy.io/*'].every(x=>now.permissions.origins.includes(x))&&now.manifest.permissions.join(',')==='storage,scripting',now.permissions);
  await p.reload({waitUntil:'domcontentloaded'});
@@ -72,9 +72,9 @@ try{
  check('legacy custom-source settings cannot activate a request',disabled.kind==='disabled'&&!hits.some(x=>x.host==='legacy-analysis.example'),disabled);
  check('disabled update checking issues no GitHub requests',!hits.some(x=>x.host==='api.github.com'));
  await popup.click('#updateCheck');
- check('enabling updates shows the newer stable release in the card',!!await until(()=>shadow(p,'const a=this.querySelector(".upd");return a&&a.textContent.includes("v0.9.22")&&a.href==="https://github.com/mickeyhogen/fomo-helper/releases/tag/v0.9.22";')));
+ check('enabling updates shows the newer stable release in the card',!!await until(()=>shadow(p,'const a=this.querySelector(".upd");return a&&a.textContent.includes("v0.9.23")&&a.href==="https://github.com/mickeyhogen/fomo-helper/releases/tag/v0.9.23";')));
  await popup.select('#lang','zh');
- check('popup switches to Chinese and retains the version',await popup.evaluate(()=>document.documentElement.lang==='zh-CN'&&document.querySelector('[data-i18n="edition"]').textContent.includes('检查更新')&&document.querySelector('#bver').textContent.includes('0.9.21')));
+ check('popup switches to Chinese and retains the version',await popup.evaluate(()=>document.documentElement.lang==='zh-CN'&&document.querySelector('[data-i18n="edition"]').textContent.includes('检查更新')&&document.querySelector('#bver').textContent.includes('0.9.22')));
  await popup.screenshot({path:OUT+'/popup-zh.png'});
  await popup.select('#lang','en');await popup.screenshot({path:OUT+'/popup-en.png'});
  await popup.click('#updateCheck');

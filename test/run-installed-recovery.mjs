@@ -133,11 +133,11 @@ try {
     await shadowCall(p, 'this.querySelector(".x").click();');
     const launcherState = () => shadowCall(p, 'const b=this.querySelector(".launcher"),r=b.getBoundingClientRect();return {visible:!b.hidden,x:r.x,y:r.y,w:r.width,h:r.height,label:b.getAttribute("aria-label"),tip:getComputedStyle(b.querySelector(".launcher-tip")).visibility};');
     let button=await launcherState();
-    check('close leaves a small visible and labelled reopen button', button.visible&&button.w===44&&button.h===44&&button.label==='打开 Fomo Lens', button);
+    check('close leaves a small visible and labelled reopen button', button.visible&&button.w<=128&&button.h>=36&&button.label==='重新打开 Fomo Lens', button);
     await p.mouse.move(1100,600);
     await p.screenshot({path:OUT+'/launcher-idle.png'});
     await p.mouse.move(button.x+22,button.y+22); await sleep(200);
-    check('hover explains the button without expanding its hit area', (await launcherState()).tip==='visible'&&(await launcherState()).w===44);
+    check('hover explains the button without expanding its hit area', (await launcherState()).tip==='visible'&&(await launcherState()).w===button.w);
     await p.screenshot({path:OUT+'/launcher-hover.png'});
     await p.mouse.click(button.x+22,button.y+22);
     check('reopen button restores the current token without page refresh', !!await until(async()=>{const s=await snapshot(p);return s?.visible&&s.name==='NEXT';}));
