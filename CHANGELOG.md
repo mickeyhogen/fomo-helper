@@ -1,21 +1,38 @@
-# 更新日志
+# Changelog
 
 ## v0.9.21 — 2026-09-05
 
-Compared with the previous public release **v0.9.8**. Versions 0.9.9–0.9.20 were private iterations and were not published as GitHub releases.
+### English
 
-- **Fomo + GMGN + XXYY in one extension.** Automatic token cards and hover previews; XXYY www/pro, old/new layouts, favorites and wallet-monitor rows. 三站合一，兼容 XXYY 新旧版与收藏、钱包监控。
-- **Fomo Thesis, Holders and holding share on all three sites.** Reuse the browser's Fomo login; show the exact-token Fomo link and a retry action when unreadable. Existing pages are preserved; temporary reader pages close after use. 统一 Fomo 数据源，补齐登录、加载和临时页清理。
-- **New holding-share bar.** Sum loaded Fomo positions against market cap, show coverage and `≥` for incomplete data, preserve very small positive values without inventing zero. 新增 Fomo 持仓占比及覆盖人数。
-- **Current-token identity and loading fixes.** Resolve Robinhood V4 pool IDs to actual CAs; normalize EVM query case while preserving Solana case. Default and same-token hover read the same narrative. Slow resolution shows a loading card; closing or switching tokens invalidates late responses. 修复当前页持续“这段暂时读不到”与默认卡不出现。
-- **Reliable virtual-list previews.** Bounded native Vue/React row probes handle recycled rows, replaced wrappers, filters and chain changes; wallet/native-transfer rows are not mistaken for token CAs. 修复收藏、钱包监控和筛选后的悬停失效。
-- **Recovery and reopening.** One automatic narrative retry, independent manual Retry, callback deadline, extension-reload reconnection and legacy-context guards. A small draggable, keyboard-accessible magnifier restores the current or last dismissed token. 补齐断线恢复与关闭后入口。
-- **Data and language consistency.** Preserve Fomo Thesis totals and the top-30 limit; wait for late theses/market cap; keep concurrent tabs independent. Chinese/English cards, settings and login/error messages. 保留观点总量、持仓口径与中英文兼容。
-- **Public upgrade path.** Retain the fixed extension ID and GitHub update checks. Custom analysis sources remain excluded. The guide and privacy policy now describe three-site access and logged-in temporary Fomo page loads accurately.
+Compared with the previous public release **v0.9.8**. Versions v0.9.9–v0.9.20 were private iterations, not public GitHub releases.
 
-**Upgrade:** overwrite the old folder, reload the extension and refresh existing site tabs once. If Chrome asks for newly added site access, enable it. Sign in to Fomo in the same browser profile for Thesis/Holders/share. Settings are retained.
+- **XXYY compatibility: supports www/pro, classic and new layouts, automatic cards on token pages, and hover previews in favorites and wallet-monitor lists.**
+- **GMGN compatibility: supports automatic cards on token pages and hover previews in wallet tracking. Live checks also covered a signed-in Solana private wallet-monitor list.**
+- Fomo data across all three sites: view theses, holders and holding share using your Fomo login in the same browser profile. When data cannot be read, the card provides the matching Fomo token link and a retry action. Existing Fomo pages are preserved; temporary reader pages close after use.
+- New holding-share bar: show the sum of loaded Fomo positions divided by market cap, together with coverage. Incomplete data is marked with `≥`; very small positive holdings are not displayed as zero.
+- Current-token loading fixes: fixed missing default cards and narratives that kept showing “unavailable.” Robinhood V4 pool addresses resolve to the actual token; EVM address casing is normalized while Solana casing is preserved. The current card and same-token hover read the same narrative, and late responses cannot overwrite a different token.
+- Reliable list previews: scrolling, filtering, changing chains and recycled rows trigger fresh token identification. Wallet addresses and native-transfer rows are not mistaken for tokens.
+- Recovery and reopening: transient narrative failures retry once automatically; manual retry preserves Fomo content already loaded. Requests have a deadline, and reloading the extension reconnects open pages. After closing a card, use the small draggable magnifier to reopen it; keyboard operation is also supported.
+- Consistent data and language: preserve thesis totals while showing up to 30 entries, wait for late Fomo fields, and keep concurrent tabs independent. Cards, settings, loading, login and error messages support Chinese and English. Public GitHub update checks remain available; custom analysis sources remain excluded. The guide and privacy policy now describe three-site access and temporary Fomo page loads.
 
-**升级：**覆盖原文件夹、重新加载扩展，首次刷新已有网页一次；如 Chrome 提示新增站点访问，请按提示启用。Fomo 数据需要同一浏览器已登录，原设置保留。
+Upgrade: overwrite the old extension folder, reload the extension and refresh existing site tabs once. If Chrome requests access to the added sites, enable it. Sign in to Fomo in the same browser profile for theses, holders and holding share. Your settings are retained.
+
+---
+
+### 中文
+
+相较上一个公开版 **v0.9.8**。v0.9.9–v0.9.20 为私测版本，未作为 GitHub 正式版发布。
+
+- **XXYY 兼容更新：支持 www/pro、新版和旧版界面；打开代币页默认显示卡片，收藏与钱包监控列表支持悬停预览。**
+- **GMGN 兼容更新：打开代币页默认显示卡片，钱包追踪列表支持悬停预览；已补验登录后的 Solana 私人钱包监控列表。**
+- 三站统一读取 Fomo 数据：观点、持有人和持仓占比使用同一浏览器里的 Fomo 登录状态。读不到时提供对应代币的 Fomo 入口和重试按钮；保留已有 Fomo 页面，临时读取页用完自动关闭。
+- 新增持仓占比横栏：按已读取的 Fomo 持仓金额合计除以市值，并显示覆盖人数。未读全时标注 `≥`，很小的正持仓也不会被显示为零。
+- 修复当前代币加载：解决默认卡片不出现、叙事持续显示“暂时读不到”的问题。Robinhood V4 池子地址先解析到实际代币，统一 EVM 地址大小写并保留 Solana 地址大小写；当前页与同币悬停显示同一叙事，过期结果不会覆盖新切换的币。
+- 修复列表悬停：滚动、筛选、换链和列表行复用后重新识别代币，避免预览失效或串币；钱包地址和原生币转账行不会被当成代币。
+- 补齐重试与重开：叙事短暂失败自动补试一次，手动重试保留已加载的 Fomo 内容；请求超时会结束等待，重新加载扩展后自动连接已有网页。关闭卡片后，可通过能拖动的小放大镜重新打开，也支持键盘操作。
+- 保持数据与语言一致：保留观点总数，最多展示 30 条；等待晚到的 Fomo 字段，多标签页互不干扰。卡片、设置、加载、登录和错误提示均支持中英文。公开版保留 GitHub 更新检查，不提供自定义分析源；使用说明与隐私说明已补齐三站访问和临时 Fomo 页面加载方式。
+
+升级方式：覆盖原扩展文件夹、重新加载扩展，首次刷新已有网页一次。若 Chrome 提示新增站点访问，请按提示启用。观点、持有人和持仓占比需要在同一浏览器中登录 Fomo，原有设置会保留。
 
 ## v0.9.8 — 2026-09-04
 
