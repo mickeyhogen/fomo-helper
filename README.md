@@ -52,7 +52,7 @@ The extension does **not** extract cookies, login tokens, private keys or seed p
 - **Narrative unavailable:** DeBot may not cover that token, or its service may be unavailable. Narrative recovery is independent of Fomo login.
 - **Translated page breaks parsing:** use the site's own language setting or switch browser page translation back to the original. Local card translation is a separate feature.
 
-Fomo data routing currently supports Solana, Ethereum, BSC, Base and Robinhood. Upstream site changes can affect parsing. GMGN private wallet-monitor lists have installed-fixture coverage; live acceptance covered its public token page, not a signed-in private monitor list.
+Fomo data routing currently supports Solana, Ethereum, BSC, Base and Robinhood. Upstream site changes can affect parsing. On 2026-09-05, v0.9.21 also passed live checks on a signed-in GMGN Solana private wallet-monitor list: native token hover, navigation, scrolling, reload and Chinese/English display. Fomo theses, holders and share matched the same token's Fomo card. Coverage still depends on the rows visible on Fomo; an unreadable result is not zero holdings.
 
 ## Development
 
