@@ -33,6 +33,12 @@ const referenceManifest=JSON.parse(fs.readFileSync(path.join(refDir,'manifest.js
 referenceManifest.name='Fomo parity reference';delete referenceManifest.action;delete referenceManifest.key;
 referenceManifest.content_scripts[0].matches=['https://reference.fomo.family/*'];
 fs.writeFileSync(path.join(refDir,'manifest.json'),JSON.stringify(referenceManifest));
+// Map only the disposable reference copy onto its fixture hostname. The candidate
+// retains its production allowlist and is installed byte-for-byte unchanged.
+const refContent=fs.readFileSync(path.join(refDir,'content.js'),'utf8');
+fs.writeFileSync(path.join(refDir,'content.js'),refContent.replace(
+ "['fomo.family', 'gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(location.hostname)",
+ "['fomo.family', 'gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(location.hostname.replace(/^reference\\./, ''))"));
 execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',temp+'/key','-out',temp+'/cert','-days','2','-subj','/CN=gmgn.ai'],{stdio:'ignore'});
 let gmgn=fs.readFileSync(DIR+(TARGET==='xxyy'?'/mock-xxyy.html':'/mock-gmgn-installed.html'),'utf8');
 let fomo=fs.readFileSync(DIR+'/mock-fomo-mirror.html','utf8');
