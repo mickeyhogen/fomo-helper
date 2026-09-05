@@ -1,96 +1,59 @@
-# Fomo Helper (Fomo放大镜)
+# Fomo Lens · Fomo放大镜
 
 **English** · [中文](README.zh-CN.md)
 
-While browsing tokens on [fomo.family](https://fomo.family), one floating card pulls together the DeBot narrative, the community's theses, the holder structure and the source tweets — no more opening three tabs just to glance at a narrative.
+One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, holders and Fomo holding share. XXYY supports both its old and new layouts, including `www.xxyy.io` and `pro.xxyy.io`.
 
-No backend · collects nothing · MIT · injects only on fomo.family · Chrome / Edge / Brave
+[Download v0.9.21](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.21/fomo-helper-v0.9.21.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
 
-[⬇ Download latest zip](https://github.com/mickeyhogen/fomo-helper/releases/latest) · [Guide](https://hogen.pro/fomo-helper) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · by [@0xHogen](https://x.com/0xHogen)
+## New since v0.9.8
 
-![The card docked on a token page](test/screenshots/33-en-fullpage.png)
+- **Three sites, one extension.** Token pages open a compact card automatically. Hover over token rows to preview them; XXYY favorites, wallet monitor widgets and both layout versions are supported.
+- **The same Fomo data everywhere.** Thesis, Holders and holding share come from Fomo. Sign in to Fomo in the same browser profile. If the extension cannot read the data, it provides the corresponding Fomo page and a retry action.
+- **Fomo holding share at a glance.** The card shows the value of loaded Fomo holdings divided by market cap, with coverage counts. Incomplete coverage is marked `≥`; unavailable data is never presented as zero.
+- **Reliable current-token loading.** XXYY pool URLs resolve to the actual contract, including Robinhood V4 pools. Mixed-case EVM addresses now retrieve the same narrative as lowercase hover addresses. Solana addresses retain their case.
+- **Recovery and reopening.** Transient narrative failures retry once. Manual Retry preserves the loaded Fomo panels. A small draggable magnifier reopens the card after dismissal. Extension reloads reconnect existing supported pages.
+- **Chinese and English.** Card and settings labels, loading states and login instructions are bilingual. Original theses keep their source language; optional local translation depends on browser support.
 
-The card docks at the right edge of the left panel, over the chart area — it never covers the token info bar or the Holders table below.
+## In the card
 
-## What's in the card
+**Meta** shows the DeBot narrative, rating rationale and source tweets. Origin and rationale are open by default; additional sections can be expanded. Secondary-pool chips come from DexScreener.
 
-Open any token page and the card pops up (closable). The three tabs are three layers of the same question: what story does this token tell, why does the community hold it, and who actually put money in.
+**Thesis** lists the highest-liked holder theses, up to 30, with position and PnL. The total reported by Fomo and the truncation notice are preserved. A newest-first view is available when the Fomo feed is readable.
 
-### Meta — what this token is
+**Holders** shows the six largest loaded positions, their PnL and holding duration; hover a row for average entry. The share bar uses **all loaded holder rows**, not just those six. It is not a complete on-chain ownership statistic.
 
-DeBot's full narrative analysis: origin and rating rationale open by default; source tweets / spread / dev collapse into one-line headers. Placeholder boilerplate ("none", "not found"…) is filtered out. The small blue chips next to the ticker are the token's **secondary-pool pairs** (e.g. `$HIMS` `$LLY` `$NVDA`) — main pools everyone has (ETH / stablecoins) are hidden; hover a chip for pool liquidity.
+Hover on a token row for about 0.6 seconds to preview it. Pin a preview with 📌. Drag the card header to move it, resize from the corner, or double-click the header to reset position and size. The reopen magnifier supports dragging, keyboard activation and saved position. Card placement is stored separately for each site.
 
-![Meta tab — origin, rating rationale, secondary-pool pairs](test/screenshots/30-en-meta.png)
+## Install or update
 
-### Thesis — in the holders' own words
+Chrome, Edge and Brave are supported; Safari and Firefox are not.
 
-Every thesis written for *this* token by holders in the Holders table: sorted by likes, de-duplicated, each row headed by that holder's position and PnL — see how much they bet before reading their reasoning. Switch between **By likes** and **Newest ≥2 likes** at the top; *Newest* reads fomo's own thesis feed, newest first with post time. Non-English theses can be auto-translated (Chrome's built-in translator), original kept.
+1. Download the release ZIP and extract it to a permanent `fomo-helper` folder.
+2. Open `chrome://extensions` (or `edge://extensions`), enable Developer mode and choose **Load unpacked**. Select the folder containing `manifest.json`.
+3. Disable older separate Fomo/GMGN/XXYY editions to avoid duplicate cards. Allow the extension to run on the supported sites.
+4. Sign in at [fomo.family](https://fomo.family) in the same browser profile, then open a token page on any supported site.
 
-![Thesis tab — holders' theses with position and PnL, sortable by newest](test/screenshots/31-en-thesis.png)
+**Updating from v0.9.8:** overwrite the original folder and click the extension's reload button. The public extension ID is unchanged, so settings are retained. Chrome may ask you to enable the extension or approve its newly added site access. Refresh existing website tabs once to clear legacy listeners. Later reloads reconnect automatically. If automatic opening was previously disabled, that preference stays disabled; use the magnifier or change the setting.
 
-### Holders — who actually put money in
+The settings panel controls language, automatic opening, hover preview, brightness, opacity and GitHub update checks. GitHub checks are cached for six hours and can be disabled.
 
-Top 6 by position, one line each: who, how big, up or down how much, held how long (`@name · $27.4K ▲34.76% · held 2d 4h`). Avg. entry shows on hover; token counts and other ledger noise stay off the card.
+## How Fomo data is read
 
-![Holders tab — top six by position with hold time](test/screenshots/32-en-holders.png)
+On Fomo, the extension reads the rendered token page. On GMGN or XXYY, it first looks for an already open matching Fomo page. If none is readable, it opens a temporary inactive Fomo token page using your existing browser login and closes that page after reading. It does not click, scroll or navigate an existing Fomo page.
 
-### Hover preview — no click needed
+The extension does **not** extract cookies, login tokens, private keys or seed phrases. Temporary Fomo pages do make the normal network requests of that website. Public narrative, tweet and pool queries send the relevant contract or tweet ID to their providers. There is no developer-operated collection server or telemetry. See [Privacy](PRIVACY.md) for exact access and storage details.
 
-Rest the mouse on a row in the left Alerts / Feed panel for 0.6 s and a preview card for that token floats up; 📌 pins it. Sweeping quickly across rows won't trigger it.
+## When data is unavailable
 
-![Hover over a list row to get a preview card](test/screenshots/26-hover-preview-fires.png)
+- **No card:** refresh the site, check extension access and the automatic-opening setting, or click the magnifier.
+- **Thesis/Holders cannot be read:** open the Fomo link, check login in the same browser profile and wait for the token page to load. Return and press ↻. A loading/login failure is not an empty portfolio.
+- **Fewer rows than expected:** Fomo filters and lazy-loaded coverage affect what can be read. `≥` and the loaded/total count make that limit visible.
+- **Narrative unavailable:** DeBot may not cover that token, or its service may be unavailable. Narrative recovery is independent of Fomo login.
+- **Translated page breaks parsing:** use the site's own language setting or switch browser page translation back to the original. Local card translation is a separate feature.
 
-### Everything adjustable
+Fomo data routing currently supports Solana, Ethereum, BSC, Base and Robinhood. Upstream site changes can affect parsing. GMGN private wallet-monitor lists have installed-fixture coverage; live acceptance covered its public token page, not a signed-in private monitor list.
 
-Auto-open mode (compact / full / off), default language and the hover-preview switch live in the extension icon's settings panel. That's all — no account, no login, nothing to fill in. `中/EN` in the card header switches language any time.
+## Development
 
-![Settings panel](test/screenshots/23-settings-openmode.png)
-
-## What it can and cannot touch
-
-It has no backend, so "secretly uploading" is something it structurally cannot do. There is no server code and no account system in this project. Settings live only in your browser's local `chrome.storage` and vanish on uninstall. It never reads your fomo session — the Thesis and Holders tabs read what fomo has already rendered on the page, without a single network request. It only exists on the `fomo.family` domain.
-
-Fetching the narrative, tweets and pools does query three third-party public endpoints; their servers can see "some IP looked up some token" in their own logs. That is unavoidable for a pull-based tool — but it isn't us collecting anything: we have no server to receive it. If that bothers you, use only the Thesis / Holders tabs, which make zero requests.
-
-| Touchpoint | Purpose | Nature |
-|---|---|---|
-| `app.debot.ai` | token narrative analysis | public endpoint, no login, no cookies, no key |
-| `fomo.family` page DOM | Thesis and Holders | zero network: reads already-rendered content, never your session |
-| `api.fxtwitter.com` | source tweet text | public read-only, no login, no posting |
-| `api.dexscreener.com` | secondary-pool pair chips | public read-only, no login, no key |
-| `api.github.com` | update check (every 6 h, can be turned off) | public read-only, no login, no key, sends no page or token data |
-
-There is no "custom data source" feature in the public build: that would mean the extension fetching an arbitrary address on your behalf — once published, an entry point for internal-network probing. So the setting doesn't exist, the request path doesn't exist, and the manifest requests no wildcard host permissions. Details in [PRIVACY.md](PRIVACY.md).
-
-## Install
-
-No app store — load the source folder directly, one minute. Works in Chrome / Edge / Brave (not Safari or Firefox).
-
-1. **Download and unzip** — [get the latest zip](https://github.com/mickeyhogen/fomo-helper/releases/latest) and unzip it to a `fomo-helper` folder. On Windows, right-click → "Extract All…"; don't just double-click into the zip.
-2. **Put the folder somewhere permanent** — e.g. `~/Documents/Extensions/` (Windows `C:\Extensions\`). The browser loads the extension from this folder on every start; leave it in Downloads and one cleanup wipes it.
-3. **Enable Developer mode** — go to `chrome://extensions` (`edge://extensions` on Edge) and switch on **Developer mode** at the top right.
-4. **Load unpacked** — click the button and pick the folder containing `manifest.json`. The icon appears in the toolbar when it's in.
-5. **Open fomo.family** — open any token page; the card pops up. No login, no sync, nothing else to set up.
-
-**Update:** download the new zip, unzip over the same folder, then hit ↻ on the extension's card in `chrome://extensions`. Settings survive — the extension ID is fixed, so moving or reinstalling the folder keeps them too. For release notifications: Watch → Custom → Releases on GitHub.
-
-## When something looks off
-
-- **Installed, but nothing shows up** — it only runs on `fomo.family`. Refresh the fomo page first; if still nothing, check it's enabled in `chrome://extensions`, hit ↻, and come back. When auto-open is off, the `🔍` button at the bottom-right of a token page opens the card.
-- **Thesis / Holders are empty, or show less than the page** — check whether fomo's **Friends only** filter is on. These tabs read what the page has rendered; with the filter on the table only holds friends, so that's all the extension can see. Switch the filter back to all; the empty state says so when it detects this.
-- Works with fomo's UI in Chinese, Japanese, German, Spanish and French as well as English (wordlists come from fomo's own locale files).
-- By default it checks once every 6 hours whether a newer version of this project exists and, if so, shows one line in the card footer. You can turn this off in the settings panel.
-- **Thesis / Holders stay empty while the browser is translating the page** — page translation rewrites the English text in fomo's table, so the extension can't recognise it. Address-bar translate icon → "Show original" (or "Never translate this site") → refresh. The empty state says so when it detects this.
-- **Thesis / Holders show a grey "scroll the Holders table into view"** — fomo's table is lazy-loaded. Once it renders, the card fills itself within 25 s; scrolling the table into view triggers it immediately. Grey text isn't an error.
-- **No post times in *Newest*** — the *Newest* mode reads fomo's thesis feed; open that tab once.
-- **"No narrative" for this token** — DeBot has no record for it. That's the data. Thesis / Holders are unaffected.
-- **Will it touch my fomo session or wallet?** — No. It sends no requests to fomo, never reads, stores or sends any token, and has no wallet permissions.
-- **Why no star rating?** — DeBot's 1–5 stars are a subjective score; the public build hides them so they aren't mistaken for investment advice. The rating rationale text stays.
-- **Do updates lose settings? What about another computer?** — Updating, moving or reinstalling in the same browser keeps everything. Another computer / browser doesn't follow — all data is local only; that's the price of the privacy design.
-- **fomo redesigned and some content stopped showing** — Thesis / Holders parse the page by text features (fomo's CSS class names are hashed), so a big redesign can degrade them to a grey hint; Meta is unaffected. Please open an [issue](https://github.com/mickeyhogen/fomo-helper/issues) — fixes are usually quick.
-
----
-
-Fomo Helper is an independent third-party open-source tool with no affiliation, endorsement or partnership with fomo.family, DeBot or any related party; all trademarks belong to their owners. Everything shown on the card is public data; nothing here is investment advice.
-
-MIT © 2026 [0xHogen](https://x.com/0xHogen) · design notes (中文): [docs/DETAILS.zh-CN.md](docs/DETAILS.zh-CN.md)
+`bash scripts/package.sh` creates the release ZIP in `dist/`. `test/README.md` describes installed-browser acceptance. The public edition does not include custom analysis sources or optional wildcard host permissions.

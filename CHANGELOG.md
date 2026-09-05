@@ -1,5 +1,22 @@
 # 更新日志
 
+## v0.9.21 — 2026-09-05
+
+Compared with the previous public release **v0.9.8**. Versions 0.9.9–0.9.20 were private iterations and were not published as GitHub releases.
+
+- **Fomo + GMGN + XXYY in one extension.** Automatic token cards and hover previews; XXYY www/pro, old/new layouts, favorites and wallet-monitor rows. 三站合一，兼容 XXYY 新旧版与收藏、钱包监控。
+- **Fomo Thesis, Holders and holding share on all three sites.** Reuse the browser's Fomo login; show the exact-token Fomo link and a retry action when unreadable. Existing pages are preserved; temporary reader pages close after use. 统一 Fomo 数据源，补齐登录、加载和临时页清理。
+- **New holding-share bar.** Sum loaded Fomo positions against market cap, show coverage and `≥` for incomplete data, preserve very small positive values without inventing zero. 新增 Fomo 持仓占比及覆盖人数。
+- **Current-token identity and loading fixes.** Resolve Robinhood V4 pool IDs to actual CAs; normalize EVM query case while preserving Solana case. Default and same-token hover read the same narrative. Slow resolution shows a loading card; closing or switching tokens invalidates late responses. 修复当前页持续“这段暂时读不到”与默认卡不出现。
+- **Reliable virtual-list previews.** Bounded native Vue/React row probes handle recycled rows, replaced wrappers, filters and chain changes; wallet/native-transfer rows are not mistaken for token CAs. 修复收藏、钱包监控和筛选后的悬停失效。
+- **Recovery and reopening.** One automatic narrative retry, independent manual Retry, callback deadline, extension-reload reconnection and legacy-context guards. A small draggable, keyboard-accessible magnifier restores the current or last dismissed token. 补齐断线恢复与关闭后入口。
+- **Data and language consistency.** Preserve Fomo Thesis totals and the top-30 limit; wait for late theses/market cap; keep concurrent tabs independent. Chinese/English cards, settings and login/error messages. 保留观点总量、持仓口径与中英文兼容。
+- **Public upgrade path.** Retain the fixed extension ID and GitHub update checks. Custom analysis sources remain excluded. The guide and privacy policy now describe three-site access and logged-in temporary Fomo page loads accurately.
+
+**Upgrade:** overwrite the old folder, reload the extension and refresh existing site tabs once. If Chrome asks for newly added site access, enable it. Sign in to Fomo in the same browser profile for Thesis/Holders/share. Settings are retained.
+
+**升级：**覆盖原文件夹、重新加载扩展，首次刷新已有网页一次；如 Chrome 提示新增站点访问，请按提示启用。Fomo 数据需要同一浏览器已登录，原设置保留。
+
 ## v0.9.8 — 2026-09-04
 
 - **修复德语 / 法语界面下 Thesis 与 Holders 全空**。v0.9.6 号称支持六种界面语言，德法两语其实一次也没生效过：`Ø Haltedauer`（平均持仓）、`Ø Einstieg`（平均买入价）、`Marktkap.`（市值）、`Détention moy.` 这几个词条，词首是 `Ø`/`À`、词尾是句点，而当时的词界判定只认 ASCII 字母，反倒要求相邻字符必须是字母数字，于是永远匹配不上。中文 / 日文因为不加词界侥幸没事，而回归测试恰好只测了中日文——所以一路全绿发到线上。现在词界改为"两侧不得紧邻 ASCII 字母数字"，德、法、西三语的变音与缩写词条一并修好，测试补齐德语、法语两条完整链路。

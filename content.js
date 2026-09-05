@@ -1,4 +1,4 @@
-/*! Fomo放大镜 · Fomo Helper — © 2026 0xHogen (https://x.com/0xHogen)
+/*! Fomo Lens · Fomo放大镜 — © 2026 0xHogen (https://x.com/0xHogen)
  *  Source: https://github.com/mickeyhogen/fomo-helper · MIT License
  *  Derivative builds: keep this notice and the visible "By @0xHogen" attribution. */
 /**
@@ -16,8 +16,122 @@
   // 线上 content script 跑在 isolated world，页面 JS 够不到这个全局，无法伪造。
   const TEST = globalThis.__FOMO_DEBOT_TEST__ === true;
 
-  const TOKEN_PATH_RE = /^\/tokens\/([^/]+)\/([A-Za-z0-9]{20,64})\/?$/;
+  // Reconnecting an updated extension replaces only its UI, never the page.
+  if (!TEST && !['fomo.family', 'gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(location.hostname)) return;
+  const extensionId = TEST ? 'test' : chrome.runtime.id;
+  const INSTANCE_KEY = '__fomoLensInstance';
+  const previous = globalThis[INSTANCE_KEY];
+  if (previous) {
+    let alive = false;
+    try { alive = previous.alive(); } catch (_) { /* Old extension context may be invalid. */ }
+    if (alive) return;
+    try { previous.dispose(); } catch (_) { /* Reconnection must survive legacy cleanup failures. */ }
+  }
+  const DISPOSE_EVENT = 'fomo-lens-dispose-' + extensionId;
+  document.dispatchEvent(new Event(DISPOSE_EVENT));
+  let disposed = false;
+  const lifecycle = new AbortController();
+  const timeouts = new Set(), intervals = new Set(), chromeListeners = [];
+  const setTimeout = (fn, ms, ...args) => {
+    const id = globalThis.setTimeout(() => { timeouts.delete(id); if (!disposed) fn(...args); }, ms);
+    timeouts.add(id);
+    return id;
+  };
+  const clearTimeout = id => { timeouts.delete(id); globalThis.clearTimeout(id); };
+  const setInterval = (fn, ms) => {
+    const id = globalThis.setInterval(() => { if (!disposed) fn(); }, ms);
+    intervals.add(id);
+    return id;
+  };
+  function listen(target, type, fn, options) {
+    const opts = typeof options === 'boolean' ? { capture: options } : (options || {});
+    target.addEventListener(type, fn, { ...opts, signal: lifecycle.signal });
+  }
+  function listenChrome(event, fn) { event.addListener(fn); chromeListeners.push([event, fn]); }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    state.seq++;
+    stopScrapers();
+    lifecycle.abort();
+    for (const id of timeouts) globalThis.clearTimeout(id);
+    for (const id of intervals) globalThis.clearInterval(id);
+    timeouts.clear(); intervals.clear();
+    for (const [event, fn] of chromeListeners) { try { event.removeListener(fn); } catch (_) {} }
+    if (host) host.remove();
+  }
+
+  // ---------- 站点适配器（v0.9.9 自用：主人常驻 xxyy）----------
+  // 叙事/Meta 页签按 CA 取数，本就站点无关；站点差异收敛在这张表里：
+  //   tokenPathRe  — 代币页路径 → {chain, ca}（捕获组 1=链 2=CA）
+  //   chainMap     — 路径链 slug → DexScreener chainId（fomo 的 robinhood 两边同名，不用映射）
+  //   tokenLinkSel — 点击换币快路径认的链接形状（anchorToken 仍会用 tokenPathRe 严格复验）
+  //   scrape       — 当前页直接读取 fomo DOM
+  //   fomoMirror   — 当前页没有持仓表时，通过后台临时 fomo 页复用登录态读取同一份数据
+  //   hover        — 左栏悬停预览（LEFT_ZONE_RATIO/fiber 探针都按 fomo 版式调的，别的站先关）
+  // ⚠️ 公开版阉割线：非 fomo 站点靠 manifest matches 卡住（公开 manifest 只有 fomo.family，
+  // SYNC 脚本自检把关），这张表进公开版也只是死代码。
+  const SITES = {
+    'fomo.family': {
+      id: 'fomo',
+      tokenPathRe: /^\/tokens\/([^/]+)\/([A-Za-z0-9]{20,64})\/?$/,
+      tokenLinkSel: 'a[href*="/tokens/"]',
+      chainMap: null,
+      scrape: true,
+      hover: true,
+    },
+    'pro.xxyy.io': {
+      id: 'xxyy',
+      // 链 slug 白名单 = 2026-09-04 宿主 Chrome 实测：sol/bsc/eth/base 是真代币页，
+      // tron/blast 会被站方 302 回 /meme（不支持）。xxyy 加新链 → 这里加一个 slug 即可。
+      // v0.9.12：+robin（xxyy 的 Robinhood 链 slug，观测台 XXYY 短链 pro.xxyy.io/robin/<CA> 同源；主人截图里选的就是这条链）
+      tokenPathRe: /^\/(sol|bsc|eth|base|robin)\/(0x[a-fA-F0-9]{64}|[A-Za-z0-9]{20,64})\/?$/i,
+      tokenLinkSel: 'a[href*="/sol/"], a[href*="/bsc/"], a[href*="/eth/"], a[href*="/base/"], a[href*="/robin/"]',
+      chainMap: { sol: 'solana', eth: 'ethereum', robin: 'robinhood' },
+      scrape: false,
+      fomoMirror: true,
+      // v0.9.12（主人：「我需要的也是左边悬停然后就弹框」）：左栏 收藏/趋势/新币 的行**不是链接**、站是 Vue 3
+      // 生产版（元素上不挂组件实例），所以走第三套解析——从 #app._vnode 走 vnode 树找到行所属组件，
+      // 读 props.item.tokenAddress（实测字段名）。左栏比 fomo 宽（1512 宽窗口 ≈530px），悬停区放宽。
+      hover: 'vue',
+      hoverZone: 0.65,
+      vueRoot: '#app',
+      rowSel: '.vue-recycle-scroller__item-view, .row',   // 虚拟列表外壳优先；内层 .row 会随复用重建
+      // 实测（PEPE/CATE/BRETT 三链核验）：xxyy 把代币 CA 302 成池子地址挂在 URL 上，
+      // 所以取数前必须过一道 DexScreener pairs 反解（background 'resolve-token'）——悬停预览同样过这道。
+      resolveAddr: true,
+    },
+    // v0.9.11（自用·独立分支）：gmgn。2026-09-05 台湾出口 headless 实测代币页
+    // /sol/token/<CA>?activityTag=kol —— URL 直接挂代币 CA（不像 xxyy 是池子），?tab=dev_token 之类
+    // 只是页签参数，parsePath 会剥掉 query。主人常驻的是左栏「Wallet Tracker → 追踪/Track」列表：
+    // 行若是 <a href="/sol/token/…"> 就能悬停预览 + 点击秒切；行不是链接也没关系——它自己会
+    // pushState 换 URL，250ms 轮询照样跟上。界面中英文都不影响：整条链路只认 URL 和链接 href。
+    'gmgn.ai': {
+      id: 'gmgn',
+      fomoMirror: true,
+      // 链 slug = gmgn 公开路由（sol/bsc/eth/base/tron/blast）+ 观测台在用的 robinhood；多列无害，只用来认代币页
+      tokenPathRe: /^\/(sol|bsc|eth|base|tron|blast|robinhood|monad|xlayer)\/token\/([A-Za-z0-9]{20,64})\/?$/i,
+      tokenLinkSel: 'a[href*="/token/"]',
+      chainMap: { sol: 'solana', eth: 'ethereum' },
+      scrape: false,
+      hover: 'gmgn-react', // DOM links first; non-link React rows use a bounded MAIN-world probe.
+      hoverZone: 0.5,    // 左栏 Wallet Tracker ≈ 460px，悬停区放宽到半屏
+      resolveAddr: false,
+    },
+  };
+  // Both official hosts offer the old and new layouts; the account tier selects the host.
+  SITES['www.xxyy.io'] = SITES['pro.xxyy.io'];
+  const SITE = SITES[String(location.hostname || '').toLowerCase()] || SITES['fomo.family'];
+  const HAS_FOMO_DATA = SITE.scrape || SITE.fomoMirror;
+  // v0.9.11：卡片位置 / 尺寸 / 圆钮位置按站点分开记——三个站版式完全不同，在 gmgn 拖到合适的位置
+  // 不该把 fomo 的也带跑。fomo 沿用老键名（老用户的记忆不丢），别的站加 @站点 后缀。
+  const SK = SITE.id === 'fomo'
+    ? { pos: 'cardPos', size: 'cardSize', launcher: 'launcherPos' }
+    : { pos: 'cardPos@' + SITE.id, size: 'cardSize@' + SITE.id, launcher: 'launcherPos@' + SITE.id };
+  const TOKEN_PATH_RE = SITE.tokenPathRe;
   const ADDR_RE = /^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+  const XXYY_POOL_ID_RE = /^0x[a-fA-F0-9]{64}$/i;
+  const isXxyyPoolRef = (ref) => SITE.id === 'xxyy' && typeof ref === 'string' && XXYY_POOL_ID_RE.test(ref);
   // fiber 探针：这些键名下面挂的地址是"人"，不是币 —— 整棵子树跳过
   const USERISH_RE = /user|wallet|profile|owner|creator|follower|account/i;
   // 只有自己或直接父键像"币"，才认这个地址
@@ -29,6 +143,8 @@
   // URL/点击进代币页的自动展示与此无关。调这一个数就能改灵敏度。
   const HOVER_DEBOUNCE_MS = 600;
   const HOVER_HIDE_MS = 400;
+  const XXYY_PROBE_RETRY_MS = 90;
+  const XXYY_PROBE_MAX_ATTEMPTS = 3;
   const LEFT_ZONE_RATIO = 0.38;
   // v0.7：800ms 轮询会让主人在新币页上先看到上一只币的卡片近 1 秒。
   // 提到 250ms，并配合"发现换币立刻清场"（见 onUrlMaybeChanged / onDocClick）。
@@ -73,9 +189,9 @@
       displayBtn: '调节亮度和透明度', brightness: '亮度', opacity: '透明度',
       updateReady: '有新版', updateHint: '点开 GitHub 发布页下载新版；解压覆盖同一文件夹后回扩展页点 ↻',
       resizeHint: '拖动调整卡片大小（会记住）',
-      preview: '预览', launcher: 'Fomo放大镜：查看当前代币的叙事/观点/持仓', copied: '已复制',
+      preview: '预览', launcher: '打开 Fomo Lens', launcherHint: '点击展开 · 拖动移位', copied: '已复制',
       notToken: '当前页面不是代币页', loadingName: '载入中…', nostoryName: '未收录代币', errorName: '读取失败',
-      source: '↗ 来源', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
+      source: '↗ 来源', resolvingToken: '正在识别当前代币…', resolveTokenFailed: '暂时无法识别这个池子的代币，点击 ↻ 重试', loadingStory: '正在读取 DeBot 叙事…', emptyStory: '这条叙事记录里没有可展示的内容',
       nostory: 'DeBot 还没有这只币的叙事记录', openDebot: '在 DeBot 打开 ↗', retry: '重试',
       secOrigin: '起源', secRating: '评级理由', secSpread: '传播', secDev: '开发者',
       fCeleb: '名人背书', fViews: '最高浏览', fLikes: '最高点赞', fComments: '最高评论', fCommunity: '社区参与', fNegative: '负面事件',
@@ -93,9 +209,19 @@
       cost: '成本 ', held: '持有 ', more: ' 展开', less: ' 收起',
       tweets: '叙事来源推文', tweetsN: '（', tweetsNEnd: ' 条）', loading: '读取中…', openTweet: '打开推文 ↗', moreTweets: '更多来源推文（',
       pairsTitle: '流动性池报价资产（按流动性排序）',
+      // v0.9.10：Fomo 持仓占比（口径同「风向」：fomo 用户合计持仓 ÷ 市值）
+      shareLabel: 'Fomo 持仓', shareTotal: '合计 ', shareMc: ' / 市值 ', shareCover: '榜内 ',
+      shareTip: 'fomo 用户合计持仓 ÷ 市值（口径同「风向」）。页面的 Holders 表只渲染前 N 行，所以这是下界（≥），真实值只会更高。经验阈值：★ ≥15% · ★★ ≥20%。市值取不到或对不上时整行不显示。',
+      fomoReading: '正在从 fomo 读取 Thesis / Holders / 持仓…',
+      fomoLogin: '需要先登录 fomo，才能读取 Thesis、Holders 和 Fomo 持仓。',
+      fomoLoginAction: '去登录 fomo ↗',
+      fomoUnavailable: '暂时没从 fomo 读到这只币的数据；请先打开 fomo 确认已登录，再回来点 ↻ 重试。',
+      fomoOpenAction: '在 fomo 打开 ↗',
+      fomoNoHolders: 'fomo 暂时没有显示这只币的持有人数据',
       trPreparing: '正在准备本地翻译（首次需下载语言包）…', trDownloading: '正在下载语言包 ', trAbsent: '此浏览器无内置翻译，只能切中/英原文',
       trHint: '中=译成中文 · EN=显示原文（Chrome 本地翻译，数据不出浏览器）', trBusy: '翻译中…',
       errDebot: '这段暂时读不到', errTweets: '来源推文暂时读不到',
+      reconnecting: '连接中断，正在重试…', contextLost: '扩展连接已失效，请刷新本页重新连接。', reloadPage: '刷新页面',
       aiLoading: 'AI 判断读取中…', ai: 'AI 判断', memeHook: 'meme点', techFlags: '技术 / 红旗', updatedAt: '更新于 ', fullReport: '查看完整分析 ↗',
       stale: '（分析时点快照，市值类数字以当时为准）', tier: ' 档',
       justNow: '刚刚', minAgo: ' 分钟前', hourAgo: ' 小时前', dayAgo: ' 天前', monthAgo: ' 个月前',
@@ -106,9 +232,9 @@
       displayBtn: 'Brightness & opacity', brightness: 'Brightness', opacity: 'Opacity',
       updateReady: 'Update', updateHint: 'Open the GitHub releases page; unzip over the same folder, then hit ↻ on the extensions page',
       resizeHint: 'Drag to resize (remembered)',
-      preview: 'preview', launcher: 'Fomo Helper: narrative / theses / holders of this token', copied: 'Copied',
+      preview: 'preview', launcher: 'Open Fomo Lens', launcherHint: 'Click to open · Drag to move', copied: 'Copied',
       notToken: 'Not a token page', loadingName: 'Loading…', nostoryName: 'Not covered', errorName: 'Failed to load',
-      source: '↗ source', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
+      source: '↗ source', resolvingToken: 'Identifying this token…', resolveTokenFailed: 'Could not identify the token in this pool. Press ↻ to retry.', loadingStory: 'Loading DeBot narrative…', emptyStory: 'Nothing to show in this narrative record',
       nostory: 'DeBot has no narrative for this token yet', openDebot: 'Open on DeBot ↗', retry: 'Retry',
       secOrigin: 'Origin', secRating: 'Rating rationale', secSpread: 'Spread', secDev: 'Developer',
       fCeleb: 'Celebrity backing', fViews: 'Top views', fLikes: 'Top likes', fComments: 'Top comments', fCommunity: 'Community', fNegative: 'Negative events',
@@ -126,9 +252,18 @@
       cost: 'cost ', held: 'held ', more: ' more', less: ' less',
       tweets: 'Source tweets', tweetsN: ' (', tweetsNEnd: ')', loading: 'Loading…', openTweet: 'Open tweet ↗', moreTweets: 'More source tweets (',
       pairsTitle: 'Pool quote assets (by liquidity)',
+      shareLabel: 'fomo share', shareTotal: 'total ', shareMc: ' / MC ', shareCover: 'top ',
+      shareTip: 'Total fomo-user holdings ÷ market cap (same yardstick as Windvane). The Holders table only renders the top N rows, so this is a floor (≥) — the true value is higher. Rule of thumb: ★ ≥15% · ★★ ≥20%. Hidden when the market cap cannot be read or does not add up.',
+      fomoReading: 'Reading Thesis, Holders and fomo share from fomo…',
+      fomoLogin: 'Log in to fomo first to read Thesis, Holders and fomo share.',
+      fomoLoginAction: 'Log in to fomo ↗',
+      fomoUnavailable: 'Could not read this token from fomo yet. Open fomo, make sure you are logged in, then return and refresh.',
+      fomoOpenAction: 'Open on fomo ↗',
+      fomoNoHolders: 'fomo is not showing holder data for this token yet',
       trPreparing: 'Preparing local translation (first run downloads a language pack)…', trDownloading: 'Downloading language pack ', trAbsent: 'This browser has no built-in translation; only 中/EN originals',
       trHint: '中 = translate to Chinese · EN = originals (Chrome on-device translation, nothing leaves the browser)', trBusy: 'Translating…',
       errDebot: 'Temporarily unavailable', errTweets: 'Source tweets temporarily unavailable',
+      reconnecting: 'Connection interrupted. Retrying…', contextLost: 'The extension connection has expired. Reload this page to reconnect.', reloadPage: 'Reload page',
       aiLoading: 'Loading AI verdict…', ai: 'AI verdict', memeHook: 'meme hook', techFlags: 'Tech / red flags', updatedAt: 'Updated ', fullReport: 'Full analysis ↗',
       stale: '(snapshot at analysis time; market-cap figures may be stale)', tier: ' tier',
       justNow: 'just now', minAgo: ' min ago', hourAgo: ' h ago', dayAgo: ' d ago', monthAgo: ' mo ago',
@@ -233,6 +368,8 @@
   let launcher = null;     // 圆钮（v0.9.6 可拖动）
   let launcherPos = null;  // {left, top} —— 拖过就记住
   let launcherWasDragged = false;
+  let lastClosedToken = null;
+  let storyAttempt = 0, storyRetryTimer = null;
   let displayBrightness = 100;  // 亮度 50–150（friend 功能移植）
   let displayOpacity = 100;     // 透明度 35–100
   let updateInfo = null;        // {tag, url, newer:boolean} —— 版本检测结果
@@ -248,6 +385,7 @@
     open: false,
     ca: null,            // 当前卡片展示的 CA
     chain: null,         // 展示用链 slug
+    srcAddr: null,       // v0.9.10：URL 上原本挂的地址（xxyy 是池子地址，反解后与 ca 不同）
     mode: 'url',         // 'url' | 'preview'
     pinned: false,
     compact: true,       // 本次展示是否精简布局（compact 模式或悬停预览恒为 true）
@@ -278,8 +416,11 @@
   //（计时到点时用最新的 target 再解析一次，位置漂了也认得出）。
   let hoverPendingRow = null;
   let hoverPendingCa = null;
+  let hoverPendingChain = null;
   let hoverPendingTarget = null;
   let hoverPendingX = 0;
+  let hoverPendingY = 0;
+  let hoverProbeSeq = 0;   // xxyy MAIN-world 探针的过期令牌；换行/离开后旧回包不许开卡
 
   // ---------- 工具 ----------
   const isHex = (s) => typeof s === 'string' && /^0x[a-fA-F0-9]{40}$/.test(s);
@@ -290,6 +431,22 @@
     const looksHex = /^0x/i.test(a) || /^0x/i.test(b);
     if (looksHex) return isHex(a) && isHex(b) && a.toLowerCase() === b.toLowerCase();
     return a === b;
+  }
+
+  function sameToken(a, b) {
+    if (!a || !b) return !a && !b;
+    return String(a.chain || '').toLowerCase() === String(b.chain || '').toLowerCase()
+      && sameTokenRef(a.ca, b.ca);
+  }
+
+  // V4 pool IDs are route references, never token CAs or Fomo data identities.
+  function sameTokenRef(a, b) {
+    return sameCa(a, b) || (isXxyyPoolRef(a) && isXxyyPoolRef(b) && a.toLowerCase() === b.toLowerCase());
+  }
+
+  function isCurrentToken(hit) {
+    if (!hit || String(hit.chain || '').toLowerCase() !== String(state.chain || '').toLowerCase()) return false;
+    return sameCa(hit.ca, state.ca) || sameTokenRef(hit.ca, state.srcAddr);
   }
 
   function shortCa(ca) {
@@ -395,7 +552,7 @@
       if (opts.title) el.setAttribute('title', opts.title);
       if (opts.href) el.setAttribute('href', opts.href);
       if (opts.attrs) for (const k in opts.attrs) el.setAttribute(k, opts.attrs[k]);
-      if (opts.on) for (const k in opts.on) el.addEventListener(k, opts.on[k]);
+      if (opts.on) for (const k in opts.on) listen(el, k, opts.on[k]);
     }
     if (kids) for (const kid of kids) if (kid) el.appendChild(kid);
     return el;
@@ -407,6 +564,7 @@
       // 同时把老的 autoOpen 也取回来，供 resolveOpenMode 做迁移判定
       // （openMode 用 null 兜底，才能区分"没存过"与"存了 compact"）。
       chrome.storage.sync.get(Object.assign({}, DEFAULTS, { openMode: null, autoOpen: null }), (v) => {
+        if (disposed) return;
         const s = Object.assign({}, DEFAULTS, v || {});
         s.openMode = resolveOpenMode(v || {});
         delete s.autoOpen;
@@ -415,18 +573,22 @@
       });
     } catch (_) { if (cb) cb(); }
     try {
-      chrome.storage.local.get({ cardPos: null, cardSize: null, launcherPos: null,
+      chrome.storage.local.get({ [SK.pos]: null, [SK.size]: null, [SK.launcher]: null,
         displayBrightness: 100, displayOpacity: 100, translatorReady: false }, (v) => {
-        if (v && v.cardSize && validSize(v.cardSize)) {   // K3 #8：NaN/负数/天文数字一律当没存过
-          savedSize = { w: v.cardSize.w, h: v.cardSize.h };
+        if (disposed) return;
+        const sz = v && v[SK.size];
+        const ps = v && v[SK.pos];
+        const lp = v && v[SK.launcher];
+        if (sz && validSize(sz)) {   // K3 #8：NaN/负数/天文数字一律当没存过
+          savedSize = { w: sz.w, h: sz.h };
           if (card) applySize();
         }
-        if (v && v.cardPos && Number.isFinite(v.cardPos.left) && Number.isFinite(v.cardPos.top)) {   // Gickey D4
-          savedPos = { left: v.cardPos.left, top: v.cardPos.top };
+        if (ps && Number.isFinite(ps.left) && Number.isFinite(ps.top)) {   // Gickey D4
+          savedPos = { left: ps.left, top: ps.top };
           if (card) applyPos();
         }
-        if (v && v.launcherPos && Number.isFinite(v.launcherPos.left) && Number.isFinite(v.launcherPos.top)) {
-          launcherPos = { left: v.launcherPos.left, top: v.launcherPos.top };
+        if (lp && Number.isFinite(lp.left) && Number.isFinite(lp.top)) {
+          launcherPos = { left: lp.left, top: lp.top };
           if (launcher) applyLauncherPos();
         }
         displayBrightness = Math.min(150, Math.max(50, Number(v && v.displayBrightness) || 100));
@@ -446,7 +608,8 @@
 
   function watchSettings() {
     try {
-      chrome.storage.onChanged.addListener((changes, area) => {
+      listenChrome(chrome.storage.onChanged, (changes, area) => {
+        if (disposed) return;
         if (area === 'local' && changes) {   // v0.9.6：popup 设置项/卡片 ☀ 改亮度透明度 → 双向同步
           let disp = false;
           if ('displayBrightness' in changes) { displayBrightness = Math.min(150, Math.max(50, Number(changes.displayBrightness.newValue) || 100)); disp = true; }
@@ -492,14 +655,29 @@
 
   // ---------- 后台通信 ----------
   function sendMsg(msg, cb) {
+    if (disposed) return;
+    let finished = false;
+    const finish = resp => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (!disposed) cb(resp);
+    };
+    // Includes both 15s DeBot origins; a lost callback must not strand the card.
+    const timer = setTimeout(() => finish({ ok: false, kind: 'message_timeout' }), 35000);
+    const failure = () => {
+      let connected = false;
+      try { connected = !!chrome.runtime.id; } catch (_) {}
+      return { ok: false, kind: connected || TEST ? 'connection' : 'context_invalidated' };
+    };
     try {
       chrome.runtime.sendMessage(msg, (resp) => {
         const err = chrome.runtime && chrome.runtime.lastError;
-        if (err) { cb({ ok: false, kind: 'network', error: '扩展后台无响应' }); return; }
-        cb(resp || { ok: false, kind: 'network', error: '后台返回空响应' });
+        if (err) { finish(failure()); return; }
+        finish(resp || { ok: false, kind: 'connection' });
       });
     } catch (_) {
-      cb({ ok: false, kind: 'network', error: '扩展上下文已失效，请刷新页面' });
+      finish(failure());
     }
   }
 
@@ -511,6 +689,15 @@
     sendMsg({ type: 'analysis-doc', ca, force: !!force }, cb);
   const requestTweets = (ids, force, cb) =>
     sendMsg({ type: 'debot-tweets', ids, force: !!force }, cb);
+  // v0.9.10（自用·xxyy）：URL 上挂的是池子地址时，先让后台经 DexScreener 反解成代币 CA
+  const requestResolve = (addr, chain, cb) =>
+    sendMsg({ type: 'resolve-token', addr, chain: chain || '' }, cb);
+  // v0.9.13：xxyy 的 Vue vnode 只存在页面 MAIN world；后台只返回坐标所在行的最小化 chain/CA。
+  const requestXxyyVueHit = (x, y, cb) =>
+    sendMsg({ type: 'xxyy-vue-hit', x: Number(x), y: Number(y) }, cb);
+  // v0.9.14：xxyy 自己没有 Thesis/Holders 表；后台临时打开同币 fomo 页，复用用户现有登录态读取 DOM。
+  const requestFomoTokenData = (ca, chain, force, cb) =>
+    sendMsg({ type: 'fomo-token-data', ca, chain: chain || '', force: !!force }, cb);
 
   // ---------- 样式 ----------
   const CSS = `
@@ -550,6 +737,15 @@
 .hdr-top { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: nowrap; }
 .hdr-acts { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .hdr-stars { margin-top: 3px; }
+/* v0.9.10：Fomo 持仓占比横栏（头部下方、与头部同色；算不出就整条不长） */
+.share-bar { padding: 3px 10px 4px; background: #131417; border-bottom: 1px solid #1e2024; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 11px; color: #9aa0aa; cursor: grab; user-select: none; }
+.share-pct { font-size: 12px; font-weight: 700; color: #cfd2d8; }
+.share-pct.buy { color: #6fd8ab; }
+.share-pct.strong { color: #40c48c; }
+.share-tag { font-size: 10px; line-height: 1.3; border-radius: 999px; padding: 0 6px; border: 1px solid; }
+.share-tag.buy { color: #6fd8ab; border-color: rgba(64,196,140,.45); background: rgba(64,196,140,.10); }
+.share-tag.strong { color: #40c48c; border-color: rgba(64,196,140,.7); background: rgba(64,196,140,.18); }
+.share-sub { color: #62666e; }
 .name { font-size: 14px; font-weight: 600; color: #fff; letter-spacing: .2px;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         max-width: 150px; flex: 0 1 auto; }
@@ -650,11 +846,29 @@ details:not([open]) > summary::before { content: "▸ "; }
         border: 2px solid #2a2d33; border-top-color: #5b9cff; animation: sp .8s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 .launcher {
-  position: fixed; right: 18px; bottom: 18px; width: 38px; height: 38px; border-radius: 50%;
-  background: #17181c; border: 1px solid #2c2f35; color: #cfd2d8; font-size: 15px;
-  cursor: pointer; z-index: 2147482999; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  position: fixed; right: 16px; bottom: 76px; width: 44px; height: 44px; padding: 0;
+  display: grid; place-items: center; border-radius: 15px;
+  background: linear-gradient(145deg, #222b35, #12171f); border: 1px solid #405368;
+  color: #a9d6ff; cursor: pointer; z-index: 2147483646;
+  box-shadow: 0 5px 18px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+  transition: border-color .16s, background .16s, box-shadow .16s;
 }
-.launcher:hover { color: #fff; border-color: #4a4d54; }
+.launcher:hover, .launcher:focus-visible { color: #dcefff; border-color: #80baff;
+  box-shadow: 0 5px 22px rgba(0,0,0,.5), 0 0 0 3px rgba(104,176,255,.12); }
+.launcher:focus-visible { outline: 2px solid #a9d6ff; outline-offset: 3px; }
+.lens-mark { width: 15px; height: 15px; box-sizing: border-box; border: 2px solid currentColor;
+  border-radius: 50%; position: relative; margin: -3px 3px 0 0; pointer-events: none; }
+.lens-mark::after { content: ''; position: absolute; width: 7px; height: 2px;
+  background: currentColor; border-radius: 2px; right: -6px; bottom: -3px; transform: rotate(45deg); }
+.launcher-tip { position: absolute; right: 54px; top: 50%; transform: translateY(-50%);
+  padding: 9px 12px; background: #19212b; border: 1px solid #354658; border-radius: 10px;
+  white-space: nowrap; text-align: left; color: #e2edf8; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .16s; }
+.launcher-tip strong { display: block; font-size: 12px; font-weight: 500; }
+.launcher-tip small { display: block; margin-top: 3px; color: #8fa4b8; font-size: 10px; }
+.launcher.tip-right .launcher-tip { left: 54px; right: auto; }
+.launcher:hover .launcher-tip, .launcher:focus-visible .launcher-tip { opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .launcher, .launcher-tip { transition: none; } }
 /* v0.9.6 亮度/透明度面板 */
 .display-panel { flex: 0 0 auto; background: #131417; border-bottom: 1px solid #1e2024;
                 padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -708,6 +922,8 @@ details:not([open]) > summary::before { content: "▸ "; }
 /* thesis / 推文 行 */
 .row-item { border-top: 1px solid #1e2024; padding: 8px 0 2px; }
 .row-item:first-of-type { border-top: none; }
+.share-sum { font-size: 11px; color: #8a8f99; padding: 2px 0 6px; margin-bottom: 4px; border-bottom: 1px solid #1e2024; }
+.share-sum .share-pct { font-size: 11px; }
 .rhead { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; margin-bottom: 3px; }
 .rauthor { color: #cfd2d8; font-weight: 600; font-size: 12px; }
 .rval { color: #6fd8ab; font-size: 11px; }
@@ -742,9 +958,13 @@ details.tweets > summary { color: #9aa0aa; }
 
   // ---------- 卡片骨架 ----------
   function ensureUi() {
-    if (shadow) return;
+    if (disposed || shadow) return;
+    for (const old of document.querySelectorAll('[data-fomo-debot]')) {
+      if (!old.dataset.fomoExtension || old.dataset.fomoExtension === extensionId) old.remove();
+    }
     host = document.createElement('div');
     host.setAttribute('data-fomo-debot', '');
+    host.dataset.fomoExtension = extensionId;
     // 宿主本身不占位，避免影响页面布局
     host.style.cssText = 'all:initial;position:static;';
     shadow = host.attachShadow({ mode: 'closed' });
@@ -788,11 +1008,15 @@ details.tweets > summary { color: #9aa0aa; }
       h('label', {}, [h('span', { cls: 'display-lbl', text: tr('opacity') }), opacityInput, opacityVal]),
     ]);
     displayPanel.hidden = true;
-    brightnessInput.addEventListener('input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
-    opacityInput.addEventListener('input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
+    listen(brightnessInput, 'input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
+    listen(opacityInput, 'input', () => updateDisplayAppearance(brightnessInput.value, opacityInput.value));
     const refreshBtn = h('button', {
       cls: 'btn icon', text: '↻', attrs: { type: 'button' }, title: tr('refresh'),
-      on: { click: () => { if (state.ca) { load(state.ca, state.chain, state.mode, true); rescanNow(true); } } },
+      on: { click: () => { if (state.ca) {
+        if (SITE.resolveAddr && state.srcAddr && (state.resolving || state.resolveFailed)) {
+          openToken({ca:state.srcAddr,chain:state.chain}, state.mode, true);
+        } else { load(state.ca, state.chain, state.mode, true); rescanNow(true); }
+      } } },
     });
     const closeBtn = h('button', {
       cls: 'btn x', text: '×', attrs: { type: 'button' }, title: tr('close'),
@@ -813,10 +1037,17 @@ details.tweets > summary { color: #9aa0aa; }
     const starRow = h('div', { cls: 'hdr-stars' }, [stars]);
     starRow.hidden = true;
     const hdr = h('div', { cls: 'hdr' }, [hdrTop, starRow]);
-    hdr.addEventListener('mousedown', onDragStart);
+    listen(hdr, 'mousedown', onDragStart);
     // v0.9.2：拖过的位置会持久化（cardPos），主人实测卡片"跑到 K 线图中间"就是拖过一次之后回不来——
     // 双击头部空白处清掉记忆位置、回到默认停靠。
-    hdr.addEventListener('dblclick', onHeaderDblClick);
+    listen(hdr, 'dblclick', onHeaderDblClick);
+    // v0.9.10：Fomo 持仓占比独占一条横栏，紧贴头部下方（主人要"一眼看到"，不必切到 Holders 页）。
+    // 不塞进 .hdr——头部"单行 ≤40px"是 v0.6 定下的瘦身线（步骤 2b 守着）；横栏与头部同色，
+    // 视觉上就是头部第二行，也一样能拖、能双击归位。算不出就整条收掉。
+    const shareRow = h('div', { cls: 'share-bar' });
+    shareRow.hidden = true;
+    listen(shareRow, 'mousedown', onDragStart);
+    listen(shareRow, 'dblclick', onHeaderDblClick);
 
     // v0.8：顶部标签栏（跟 fomo 自家的 tab 一个用法）。
     // 叙事（默认）= DeBot 叙事 + AI 判断 + 来源推文；观点 = 持有人 thesis（按点赞排）；
@@ -837,9 +1068,10 @@ details.tweets > summary { color: #9aa0aa; }
     paneHolders.hidden = true;
 
     const tabBtns = [];
-    const tabDefs = [
+    // fomo 直接读当前页；xxyy 通过登录态镜像读同币 fomo 页。两者都展示完整三页。
+    const tabDefs = HAS_FOMO_DATA ? [
       ['narrative', 'tabMeta'], ['views', 'tabThesis'], ['holders', 'tabHolders'],
-    ];
+    ] : [['narrative', 'tabMeta']];
     for (const [key, label] of tabDefs) {
       const count = h('span', { cls: 'tcount' });
       const btn = h('button', {
@@ -857,29 +1089,32 @@ details.tweets > summary { color: #9aa0aa; }
       h('span', { cls: 'byfoot-sp' }),
       h('span', { text: 'By ' }),
       h('a', { text: '@0xHogen', href: 'https://x.com/0xHogen',
-        attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo放大镜 · Fomo Helper — by @0xHogen' } }),
+        attrs: { target: '_blank', rel: 'noopener noreferrer', title: 'Fomo Lens · Fomo放大镜 — by @0xHogen' } }),
     ]);
     grip = h('div', { cls: 'grip', title: tr('resizeHint') });
-    grip.addEventListener('mousedown', onResizeStart);
-    card = h('div', { cls: 'card' }, [hdr, displayPanel, tabs, body, byfoot, grip]);
+    listen(grip, 'mousedown', onResizeStart);
+    card = h('div', { cls: 'card' }, [hdr, shareRow, displayPanel, tabs, body, byfoot, grip]);
     card.hidden = true;
-    card.addEventListener('mouseenter', () => { cancelHide(); rescanNow(); });
-    card.addEventListener('mouseleave', () => { if (state.mode === 'preview') scheduleHide(); });
+    listen(card, 'mouseenter', () => { cancelHide(); rescanNow(); });
+    listen(card, 'mouseleave', () => { if (state.mode === 'preview') scheduleHide(); });
 
     // --- 圆钮 ---
     launcher = h('button', {
-      cls: 'launcher', text: '🔍', attrs: { type: 'button' },
-      title: tr('launcher'),
+      cls: 'launcher', attrs: { type: 'button', 'aria-label': tr('launcher'), 'aria-expanded': 'false' },
       on: { click: onLauncherClick },
-    });
-    launcher.addEventListener('mousedown', onLauncherDragStart);   // v0.9.6 可拖动
+    }, [h('span', { cls: 'lens-mark', attrs: { 'aria-hidden': 'true' } }),
+      h('span', { cls: 'launcher-tip', attrs: { 'aria-hidden': 'true' } }, [
+        h('strong', { text: tr('launcher') }), h('small', { text: tr('launcherHint') }),
+      ]),
+    ]);
+    listen(launcher, 'mousedown', onLauncherDragStart);   // v0.9.6 可拖动
 
     shadow.appendChild(card);
     shadow.appendChild(launcher);
     document.documentElement.appendChild(host);
 
     els = { name, caBtn, pinBtn, langBtn, refreshBtn, closeBtn, langZh, langEn, langSep, langBusy, stars, starRow,
-            pairsWrap, pvChip, hdr, body, tabBtns, displayBtn, displayPanel, byfoot,
+            pairsWrap, pvChip, hdr, body, tabBtns, displayBtn, displayPanel, byfoot, shareRow,
             brightnessInput, opacityInput, brightnessVal, opacityVal,
             paneNarrative, paneViews, paneHolders,
             slotDebot, slotDebotTail, slotThesis, slotAnalysis, slotKol, slotTweets };
@@ -893,6 +1128,24 @@ details.tweets > summary { color: #9aa0aa; }
    * 以 "Alerts" 标签为锚往上爬，取第一个够大的容器当面板本体。
    */
   function findLeftPanel() {
+    if (SITE.id === 'gmgn') {
+      // Real GMGN uses a div-based WalletTrack pane, including before login.
+      // Its width is resizable; a fixed x=440 can cover the rightmost row cells.
+      const tracker = document.querySelector('[data-sentry-component="WalletTrack"]');
+      if (tracker) {
+        const r = tracker.getBoundingClientRect();
+        if (r.left >= 0 && r.left < 100 && r.width >= 200 && r.width <= innerWidth * 0.55 && r.height >= 120) return r;
+      }
+      const starts = [...document.querySelectorAll('[role="tab"][id$="-tab-tracking"]'), previewRow,
+        ...document.querySelectorAll('aside,[role="complementary"],a[href*="/token/"]')].filter(Boolean);
+      for (const start of starts.slice(0, 80)) {
+        for (let el = start, up = 0; el && el !== document.body && up < 12; up++, el = el.parentElement) {
+          const r = el.getBoundingClientRect();
+          if (r.left >= 0 && r.left < 100 && r.width >= 200 && r.width <= innerWidth * 0.55 && r.height >= 300) return r;
+        }
+      }
+      return null;
+    }
     try {
       // 只在"按钮/标签/链接"里找锚，绝不遍历 div——读大 div 的 textContent
       // 会拿到整页文本，成千上万次就是自爆。锚元素文本很短，安全。
@@ -922,7 +1175,19 @@ details.tweets > summary { color: #9aa0aa; }
         };
       }
     } catch (_) { /* 落到兜底 */ }
-    return { left: DOCK_FALLBACK.left, top: DOCK_FALLBACK.top };
+    return { left: SITE.id === 'gmgn' ? 440 : DOCK_FALLBACK.left, top: DOCK_FALLBACK.top };
+  }
+
+  let gmgnDockGeometry = '';
+  function refreshGmgnDock() {
+    if (SITE.id !== 'gmgn' || !card || card.hidden || savedPos) return;
+    const panel = document.querySelector('[data-sentry-component="WalletTrack"]');
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const geometry = [r.left, r.right, r.top, r.height, innerWidth, innerHeight].join('|');
+    if (geometry === gmgnDockGeometry) return;
+    gmgnDockGeometry = geometry;
+    applyPos();
   }
 
   /**
@@ -1026,10 +1291,10 @@ details.tweets > summary { color: #9aa0aa; }
       window.removeEventListener('mousemove', move, true);
       window.removeEventListener('mouseup', up, true);
       els.hdr.classList.remove('dragging');
-      try { chrome.storage.local.set({ cardPos: savedPos }); } catch (_) { /* 忽略 */ }
+      try { chrome.storage.local.set({ [SK.pos]: savedPos }); } catch (_) { /* 忽略 */ }
     };
-    window.addEventListener('mousemove', move, true);
-    window.addEventListener('mouseup', up, true);
+    listen(window, 'mousemove', move, true);
+    listen(window, 'mouseup', up, true);
     e.preventDefault();
   }
 
@@ -1086,11 +1351,11 @@ details.tweets > summary { color: #9aa0aa; }
       window.removeEventListener('mouseup', up, true);
       window.removeEventListener('blur', up);
       card.classList.remove('resizing');
-      try { chrome.storage.local.set({ cardSize: savedSize }); } catch (_) { /* 忽略 */ }
+      try { chrome.storage.local.set({ [SK.size]: savedSize }); } catch (_) { /* 忽略 */ }
     };
-    window.addEventListener('mousemove', move, true);
-    window.addEventListener('mouseup', up, true);
-    window.addEventListener('blur', up, { once: true });   // K3 #11：拖出浏览器窗口松手收不到 mouseup
+    listen(window, 'mousemove', move, true);
+    listen(window, 'mouseup', up, true);
+    listen(window, 'blur', up, { once: true });   // K3 #11：拖出浏览器窗口松手收不到 mouseup
   }
 
   function onHeaderDblClick(e) {
@@ -1102,7 +1367,7 @@ details.tweets > summary { color: #9aa0aa; }
   function resetDock() {
     savedPos = null;
     savedSize = null;
-    try { chrome.storage.local.remove(['cardPos', 'cardSize']); } catch (_) { /* 忽略 */ }
+    try { chrome.storage.local.remove([SK.pos, SK.size]); } catch (_) { /* 忽略 */ }
     applySize();   // 内部会调 applyPos，位置与尺寸一起归位
     toast(tr('docked'));
   }
@@ -1127,21 +1392,15 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function checkUpdate() {
+    if (disposed) return;
     if (!settings.updateCheck) { updateInfo = null; renderUpdateNotice(); return; }
-    try {
-      chrome.runtime.sendMessage({ type: 'version-check' }, (resp) => {
-        try { if (chrome.runtime.lastError) return; } catch (_) { return; }
-        if (!resp || !resp.ok || !resp.payload || !resp.payload.tag) return;
-        const tag = resp.payload.tag;
-        updateInfo = {
-          tag,
-          url: resp.payload.link || resp.payload.url || RELEASE_PAGE,   // 发布说明里贴了推特就跳推特
-          gist: resp.payload.gist || '',
-          newer: cmpVersion(localVersion(), tag) < 0,
-        };
-        renderUpdateNotice();
-      });
-    } catch (_) { /* 忽略 */ }
+    sendMsg({ type: 'version-check' }, (resp) => {
+      if (!settings.updateCheck || !resp || !resp.ok || !resp.payload || !resp.payload.tag) return;
+      const tag = resp.payload.tag;
+      updateInfo = { tag, url: resp.payload.link || resp.payload.url || RELEASE_PAGE,
+        gist: resp.payload.gist || '', newer: cmpVersion(localVersion(), tag) < 0 };
+      renderUpdateNotice();
+    });
   }
 
   const RELEASE_PAGE = 'https://github.com/mickeyhogen/fomo-helper/releases/latest';
@@ -1168,6 +1427,15 @@ details.tweets > summary { color: #9aa0aa; }
   function buildDiag() {
     const d = {};
     try { d.ver = chrome.runtime.getManifest().version; } catch (_) { d.ver = '?'; }
+    d.site = SITE.id;
+    // v0.9.11：站点适配排查——悬停策略 + 页面上能认成代币的链接数（gmgn 左栏「追踪」行是不是链接，看这个数就知道）
+    d.hover = SITE.hover === true ? 'fomo' : (SITE.hover || 'off');
+    if (SITE.vueRoot) {
+      d.vueProbe = TEST ? 'direct-test' : 'background-main';
+      // 只有主世界测试夹具能直读 _vnode；真扩展的 isolated world 读不到是正常现象。
+      if (TEST) { try { const r = document.querySelector(SITE.vueRoot); d.vueRoot = !!(r && r._vnode); } catch (_) { d.vueRoot = 'err'; } }
+    }
+    try { d.tokenAnchors = Array.from(document.querySelectorAll(SITE.tokenLinkSel)).filter((a) => anchorToken(a)).length; } catch (_) { d.tokenAnchors = -1; }
     // Gickey D6：page 只给路由模板；完整 CA 不进报告（token 字段已截断）
     d.page = location.pathname.replace(/0x[0-9a-fA-F]{6,}|[1-9A-HJ-NP-Za-km-z]{28,}/g, '…');
     d.token = urlToken ? (urlToken.chain + '/' + String(urlToken.ca).slice(0, 8) + '…') : 'none';
@@ -1177,6 +1445,12 @@ details.tweets > summary { color: #9aa0aa; }
     d.pageText = bodyText.length;
     d.holdAnchors = (bodyText.match(SCRAPE_HOLD_G) || []).length;
     try { d.holderRows = collectHolderRows().length; } catch (_) { d.holderRows = -1; }
+    // v0.9.10：持仓占比三件套——市值来源、fomo 持有人总数、当前算出的占比（远程排查"为什么没显示"）
+    try { const mc = readMarketCap(); d.mc = mc ? (mc.src + ':' + Math.round(mc.usd)) : 'none'; } catch (_) { d.mc = 'err'; }
+    try { d.fomoHolders = fomoHolderTotal(); } catch (_) { d.fomoHolders = null; }
+    d.share = (state.holders && state.holders.share)
+      ? (state.holders.share.pct + '%|' + state.holders.share.counted + '/' + state.holders.share.total + '|' + state.holders.share.tier)
+      : ('none:' + (shareReject || '-'));
     try { d.thesisCol = !!findThesisColumn(); } catch (_) { d.thesisCol = null; }
     d.bottomTab = fomoBottomTab();
     d.friendsOnly = friendsOnlyActive();
@@ -1303,7 +1577,11 @@ details.tweets > summary { color: #9aa0aa; }
     els.pvChip.textContent = tr('preview');
     if (grip) grip.setAttribute('title', tr('resizeHint'));
     if (els.displayBtn) els.displayBtn.setAttribute('title', tr('displayBtn'));
-    if (launcher) launcher.setAttribute('title', tr('launcher'));
+    if (launcher) {
+      launcher.setAttribute('aria-label', tr('launcher'));
+      launcher.querySelector('strong').textContent = tr('launcher');
+      launcher.querySelector('small').textContent = tr('launcherHint');
+    }
   }
 
   function applyLangChange() {
@@ -1322,21 +1600,30 @@ details.tweets > summary { color: #9aa0aa; }
 
   function onLauncherClick() {
     if (launcherWasDragged) { launcherWasDragged = false; return; }   // 刚拖完的那一下 click 不当"打开"
-    if (urlToken) load(urlToken.ca, urlToken.chain, 'url', false);
+    const current = parsePath(location.pathname);
+    if (current) { urlToken = current; openFromUrl(current); }
+    else if (lastClosedToken) openToken(lastClosedToken, 'manual');
     else toast(tr('notToken'));
   }
 
   /** 圆钮位置（拖过才有）；钳在视口内。 */
   function applyLauncherPos() {
-    if (!launcher || !launcherPos) return;
-    const maxL = Math.max(0, window.innerWidth - 46);
-    const maxT = Math.max(0, window.innerHeight - 46);
-    launcherPos.left = Math.min(Math.max(0, launcherPos.left), maxL);
-    launcherPos.top = Math.min(Math.max(0, launcherPos.top), maxT);
+    if (!launcher) return;
+    const maxL = Math.max(8, window.innerWidth - 52);
+    const maxT = Math.max(8, window.innerHeight - 52);
+    if (!launcherPos) {
+      launcher.style.left = ''; launcher.style.top = '';
+      launcher.style.right = '16px'; launcher.style.bottom = Math.min(76, Math.max(8, innerHeight - 52)) + 'px';
+      launcher.classList.remove('tip-right');
+      return;
+    }
+    launcherPos.left = Math.min(Math.max(8, launcherPos.left), maxL);
+    launcherPos.top = Math.min(Math.max(8, launcherPos.top), maxT);
     launcher.style.left = launcherPos.left + 'px';
     launcher.style.top = launcherPos.top + 'px';
     launcher.style.right = 'auto';
     launcher.style.bottom = 'auto';
+    launcher.classList.toggle('tip-right', launcherPos.left < 220);
   }
 
   function onLauncherDragStart(e) {
@@ -1358,11 +1645,11 @@ details.tweets > summary { color: #9aa0aa; }
       window.removeEventListener('mouseup', up, true);
       window.removeEventListener('blur', up);
       launcherWasDragged = moved;
-      if (moved) { try { chrome.storage.local.set({ launcherPos }); } catch (_) { /* 忽略 */ } }
+      if (moved) { try { chrome.storage.local.set({ [SK.launcher]: launcherPos }); } catch (_) { /* 忽略 */ } }
     };
-    window.addEventListener('mousemove', move, true);
-    window.addEventListener('mouseup', up, true);
-    window.addEventListener('blur', up, { once: true });
+    listen(window, 'mousemove', move, true);
+    listen(window, 'mouseup', up, true);
+    listen(window, 'blur', up, { once: true });
     e.preventDefault();
   }
 
@@ -1398,6 +1685,12 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function closeCard() {
+    if (state.ca) lastClosedToken = { ca: state.srcAddr || state.ca, chain: state.chain };
+    cancelStoryRetry();
+    cancelHoverDwell();
+    resolveSeq.url++;
+    resolveSeq.preview++;
+    state.seq++;
     state.open = false;
     state.pinned = false;
     state.ca = null;
@@ -1406,7 +1699,7 @@ details.tweets > summary { color: #9aa0aa; }
     clearReveal();
     stopScrapers();
     if (card) card.hidden = true;
-    if (launcher) launcher.hidden = false;
+    if (launcher) { launcher.hidden = false; applyLauncherPos(); }
   }
 
   function scheduleHide() {
@@ -1415,7 +1708,7 @@ details.tweets > summary { color: #9aa0aa; }
       if (state.mode !== 'preview' || state.pinned) return;
       previewRow = null;
       // 预览退场：URL 本身是代币页且开着自动弹出时，回到该币的卡片，而不是整卡消失
-      if (urlToken && autoOpenEnabled()) load(urlToken.ca, urlToken.chain, 'url', false);
+      if (urlToken && autoOpenEnabled()) openFromUrl(urlToken);
       else closeCard();
     }, HOVER_HIDE_MS);
   }
@@ -1424,12 +1717,104 @@ details.tweets > summary { color: #9aa0aa; }
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
   }
 
+  function cancelHoverDwell() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    hoverProbeSeq++;
+    hoverPendingRow = null;
+    hoverPendingCa = null;
+    hoverPendingChain = null;
+    hoverPendingTarget = null;
+    hoverPendingX = 0;
+    hoverPendingY = 0;
+  }
+
   // ---------- 载入 + 渲染 ----------
+  const mirrorText = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+  /** 后台只会回 fomo content script 生成的最小快照；前台仍做一次字段/长度收口。 */
+  function normalizeMirrorHolder(row) {
+    if (!row || typeof row !== 'object') return null;
+    const out = {
+      handle: mirrorText(row.handle, 32), positionUsd: mirrorText(row.positionUsd, 32),
+      avgEntry: mirrorText(row.avgEntry, 32), pnl: mirrorText(row.pnl, 32),
+      pnlPos: row.pnlPos === true ? true : (row.pnlPos === false ? false : null),
+      avgHold: mirrorText(row.avgHold, 40),
+    };
+    return out.positionUsd || out.pnl ? out : null;
+  }
+
+  function normalizeMirrorThesis(row) {
+    if (!row || typeof row !== 'object') return null;
+    const text = mirrorText(row.text, 4000);
+    if (!text) return null;
+    const likes = Math.max(0, Math.min(1000000, Number(row.likes) || 0));
+    const age = row.ageMin == null ? NaN : Number(row.ageMin);
+    return {
+      handle: mirrorText(row.handle, 32), symbol: '', text,
+      url: safeHttps(row.url) || '', likes: Math.floor(likes),
+      time: mirrorText(row.time, 40), ageMin: Number.isFinite(age) && age >= 0 ? age : null,
+      positionUsd: mirrorText(row.positionUsd, 32), pnl: mirrorText(row.pnl, 32),
+      pnlPos: row.pnlPos === true ? true : (row.pnlPos === false ? false : null),
+    };
+  }
+
+  function normalizeMirrorShare(sh) {
+    const clean = snapshotFomoShare(sh);
+    if (!clean) return null;
+    // Fomo uses the unrounded ratio for stars, then rounds only the displayed percentage.
+    const pct = clean.sumUsd / clean.mcUsd * 100;
+    return {
+      ...clean,
+      tier: pct >= SHARE_STRONG_PCT ? 'strong' : (pct >= SHARE_BUY_PCT ? 'buy' : 'low'),
+    };
+  }
+
+  /** 只接受后台构造的 fomo token 链接；登录 CTA 不允许被变成任意外链。 */
+  function safeFomoPayloadUrl(raw, tokenOnly) {
+    try {
+      const u = new URL(String(raw || ''));
+      if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== 'fomo.family') return '';
+      if (tokenOnly && !/^\/tokens\/[a-z0-9_-]+\/[A-Za-z0-9]{20,64}\/?$/i.test(u.pathname)) return '';
+      return u.href;
+    } catch (_) { return ''; }
+  }
+
+  function applyFomoMirrorResponse(seq, resp) {
+    if (seq !== state.seq) return;
+    const fomoUrl = safeFomoPayloadUrl(resp && (resp.fomoUrl || (resp.payload && resp.payload.fomoUrl)), true);
+    if (resp && resp.ok && resp.payload && typeof resp.payload === 'object') {
+      const holders = (Array.isArray(resp.payload.holders) ? resp.payload.holders : [])
+        .slice(0, HOLDER_SHOW).map(normalizeMirrorHolder).filter(Boolean);
+      const thesis = (Array.isArray(resp.payload.thesis) ? resp.payload.thesis : [])
+        .slice(0, THESIS_TAB_SHOW).map(normalizeMirrorThesis).filter(Boolean);
+      const total = resp.payload.thesisTotal;
+      const totalCount = Number.isSafeInteger(total) && total >= thesis.length && total <= 1000000
+        ? total : thesis.length;
+      const feed = (Array.isArray(resp.payload.feed) ? resp.payload.feed : [])
+        .slice(0, 60).map(normalizeMirrorThesis).filter(Boolean);
+      const share = normalizeMirrorShare(resp.payload.share);
+      state.holders = holders.length
+        ? { status: 'ready', data: holders, error: null, share, source: 'fomo-mirror', fomoUrl }
+        : { status: 'empty', data: null, error: null, share: null, source: 'fomo-mirror', fomoUrl };
+      state.thesis = thesis.length
+        ? { status: 'ready', data: thesis, totalCount, error: null, holdersPresent: holders.length > 0, feed, source: 'fomo-mirror', fomoUrl }
+        : { status: 'empty', data: null, error: null, holdersPresent: holders.length > 0, feed, source: 'fomo-mirror', fomoUrl };
+    } else {
+      const kind = resp && resp.kind === 'auth_required' ? 'auth_required' : 'unavailable';
+      state.holders = { status: kind, data: null, error: null, source: 'fomo-mirror', fomoUrl };
+      state.thesis = { status: kind, data: null, error: null, source: 'fomo-mirror', fomoUrl };
+    }
+    renderKol();
+    renderThesis();
+  }
+
   /**
    * 四个源并行发车，各自到达各自渲染。
    * 关键纪律：自配分析源(2.5s 硬超时)与 fomo 取数都不得延后 DeBot 段的显示。
    */
-  function load(ca, chain, mode, force) {
+  function load(ca, chain, mode, force, resolving = false) {
+    if (disposed) return;
+    cancelStoryRetry();
     ensureUi();
     cancelHide();
     state.ca = ca;
@@ -1444,8 +1829,10 @@ details.tweets > summary { color: #9aa0aa; }
     state.tweetsOpen = !state.compact;
     state.open = true;
     state.status = 'loading';
+    state.resolving = resolving;
     state.history = null;
     state.error = null;
+    state.errorKind = null;
     const analysisOn = nonEmpty(settings.analysisTemplate);
     state.analysis = { status: analysisOn ? 'loading' : 'disabled', data: null, error: null };
     state.holders = { status: 'scanning', data: null, error: null };
@@ -1476,6 +1863,9 @@ details.tweets > summary { color: #9aa0aa; }
     renderKol();
     renderTweets();
 
+    // Render while resolving a pool, before any token-specific data request.
+    if (resolving) return;
+
     // 0) 池子交易对（DexScreener 公开只读；失败静默，头部就是没有 chips 而已）
     requestPairs(ca, chain, force, (resp) => {
       if (seq !== state.seq) return;
@@ -1486,23 +1876,7 @@ details.tweets > summary { color: #9aa0aa; }
     });
 
     // 1) DeBot 叙事（主体）
-    requestStory(ca, force, (resp) => {
-      if (seq !== state.seq) return; // 已被更新的请求取代
-      if (resp && resp.ok) {
-        state.status = 'ready';
-        state.history = resp.payload;
-      } else {
-        state.status = (resp && resp.kind === 'nostory') ? 'nostory' : 'error';
-        // 原始错误串到此为止：只留一个 kind 供诊断，界面上永远只渲染 FRIENDLY 的固定文案
-        state.error = null;
-        state.errorKind = (resp && resp.kind) || 'network';
-      }
-      paintChrome();
-      paintHeader();
-      renderDebot();
-      loadTweets(seq, force);
-      scanScrapers(seq, ca, chain); // 拿到 symbol 后重扫，thesis 才能按币过滤
-    });
+    loadNarrative(seq, ca, chain, force);
 
     // 2) 自定义分析源（可选；失败即降级成一行灰字，绝不拖累其它段）
     if (analysisOn) {
@@ -1524,8 +1898,51 @@ details.tweets > summary { color: #9aa0aa; }
       });
     }
 
-    // 3) 持仓表 + Feed thesis：直接抓页面已渲染的 DOM（表格懒加载 → 短时重扫）
-    startScrapers(seq, ca, chain);
+    // 3) fomo 当前页直接扫 DOM；xxyy 从临时 fomo 页取同样的最小快照。
+    if (SITE.scrape) startScrapers(seq, ca, chain);
+    else if (SITE.fomoMirror) {
+      requestFomoTokenData(ca, chain, force, (resp) => applyFomoMirrorResponse(seq, resp));
+    }
+  }
+
+  function cancelStoryRetry() {
+    storyAttempt++;
+    if (storyRetryTimer) clearTimeout(storyRetryTimer);
+    storyRetryTimer = null;
+  }
+
+  function loadNarrative(seq, ca, chain, force, retries = 1) {
+    const attempt = ++storyAttempt;
+    requestStory(ca, force, resp => {
+      if (disposed || !state.open || seq !== state.seq || attempt !== storyAttempt) return;
+      const kind = (resp && resp.kind) || 'network';
+      if ((!resp || !resp.ok) && retries > 0 && ['network', 'connection', 'message_timeout'].includes(kind)) {
+        state.status = 'loading';
+        renderDebot();
+        const text = els.slotDebot.querySelector('.state');
+        if (text) text.textContent = tr('reconnecting');
+        storyRetryTimer = setTimeout(() => {
+          storyRetryTimer = null;
+          if (seq === state.seq && attempt === storyAttempt && state.open) loadNarrative(seq, ca, chain, true, retries - 1);
+        }, 1000);
+        return;
+      }
+      state.status = resp && resp.ok ? 'ready' : (kind === 'nostory' ? 'nostory' : 'error');
+      state.history = resp && resp.ok ? resp.payload : null;
+      state.error = null;
+      state.errorKind = resp && resp.ok ? null : kind;
+      paintChrome(); paintHeader(); renderDebot();
+      loadTweets(seq, force);
+      scanScrapers(seq, ca, chain);
+    });
+  }
+
+  function retryNarrative() {
+    if (!state.ca || !state.open || state.status === 'loading') return;
+    cancelStoryRetry();
+    state.status = 'loading'; state.errorKind = null;
+    paintHeader(); renderDebot();
+    loadNarrative(state.seq, state.ca, state.chain, true);
   }
 
   /** DeBot 的 source_tweets 到手后才能取推文正文。 */
@@ -1761,12 +2178,13 @@ details.tweets > summary { color: #9aa0aa; }
     const body = els.slotDebot;
     const tail = els.slotDebotTail;
     tail.textContent = '';
+    if (renderUnresolvedPool(body)) return;
 
     if (state.status === 'loading') {
       body.textContent = '';
       body.appendChild(h('div', { cls: 'state' }, [
         h('div', { cls: 'spin' }),
-        h('span', { text: tr('loadingStory') }),
+        h('span', { text: tr(state.resolving ? 'resolvingToken' : 'loadingStory') }),
       ]));
       return;
     }
@@ -1839,13 +2257,14 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function renderErrorState() {
+    const invalid = state.errorKind === 'context_invalidated';
     els.slotDebot.textContent = '';
     els.slotDebotTail.textContent = '';
     els.slotDebot.appendChild(h('div', { cls: 'state' }, [
-      h('span', { cls: 'em', text: FRIENDLY.debot }),
+      h('span', { cls: 'em', text: invalid ? tr('contextLost') : FRIENDLY.debot }),
       h('button', {
-        cls: 'btn', text: tr('retry'), attrs: { type: 'button' },
-        on: { click: () => load(state.ca, state.chain, state.mode, true) },
+        cls: 'btn', text: tr(invalid ? 'reloadPage' : 'retry'), attrs: { type: 'button' },
+        on: { click: () => { if (invalid) location.reload(); else retryNarrative(); } },
       }),
     ]));
   }
@@ -2370,13 +2789,115 @@ details.tweets > summary { color: #9aa0aa; }
     return rows;
   }
 
+  /** 已解析的持有人行 → 按仓位取前 6（Holders 页展示用）。 */
+  function topHolders(parsed) {
+    const rows = (parsed || []).slice();
+    rows.sort((a, b) => moneyValue(b.positionUsd) - moneyValue(a.positionUsd));
+    return rows.slice(0, HOLDER_SHOW);
+  }
+
   /** 持仓表：抓每一行含 "avg. hold" 的块，解析 handle/仓位/入场价/盈亏，按仓位取前 6。 */
   function scrapeHolders(rowElsIn) {
     const rowEls = rowElsIn || collectHolderRows();
     if (!rowEls.length) return [];
-    const rows = parseHoldersGuarded(rowEls).slice();
-    rows.sort((a, b) => moneyValue(b.positionUsd) - moneyValue(a.positionUsd));
-    return rows.slice(0, HOLDER_SHOW);
+    return topHolders(parseHoldersGuarded(rowEls));
+  }
+
+  // ---- Fomo 持仓占比（v0.9.10）--------------------------------------------------
+  //
+  // 口径同「风向」：fomo 用户合计持仓 ÷ 市值。两个数都在 fomo 页面上已经渲染好了——
+  // 每人的 $仓位在 Holders 表里（与上面同一张表、同一次解析），市值在代币信息条上——
+  // 所以零网络、不登录、不烧任何第三方配额。
+  // ⚠️ 这是**下界**：真页面 Holders (550) 只渲染了 48 行（2026-09-04 VISTA 实测），表外的人
+  //   每个都拿得更少，但仍是漏算的，所以数字前带 ≥，并在副行标出榜单覆盖了多少人。
+  // ⚠️ fail-closed：市值取不到、或合计 > 市值（说明抓到的不是市值）→ 整行不显示，
+  //   绝不画一个"看着很正常的 0%"。
+  const SHARE_BUY_PCT = 15;      // 主人经验阈值：≥15% 值得看（★）
+  const SHARE_STRONG_PCT = 20;   // ≥20% 强（★★）
+  let shareReject = '';          // 上次算不出的原因（no-rows / no-mc / bad-pct / over100），只进诊断（Kimi 审查 F2/F5）
+  // 代币信息条上的 "Market cap" 叶子元素（6 语种锚点同 L10N）；无词界版——textContent 拼死的短串
+  const MC_LABEL_RE = new RegExp('^\\s*' + alt(L10N.marketCap, true) + '\\s*$', 'i');
+  // 底部标签 / 表标题的 "Holders (550)"：括号里的数 = fomo 持有人总数（信息条上的 "Holders 3K" 是链上持有人，无括号，不会误中）
+  const HOLDERS_COUNT_RE = new RegExp('^\\s*' + alt(L10N.holders, true) + '\\s*[（(]\\s*([\\d,]+)\\s*[)）]\\s*$', 'i');
+
+  /**
+   * 市值：① 信息条——叶子元素文本恰为 "Market cap"，父元素文本 = "Market cap $3.3M"（真页面实测形状；
+   * Swaps 表头里那个 "Market Cap" 父文本无金额，自然落选）；② 兜底读页面标题 "$3.3M MC | VISTA | fomo"。
+   */
+  function readMarketCap() {
+    try {
+      const all = document.body ? document.body.querySelectorAll('div, span, p, dt, th, td, li, b, strong') : [];
+      let n = 0;
+      for (const el of all) {
+        if (++n > 20000) break;                        // 超长页面封顶（真页面几千个节点；封顶后还有标题兜底）
+        if (el.childElementCount) continue;
+        const t = el.textContent || '';
+        if (t.length > 24 || !MC_LABEL_RE.test(t)) continue;
+        const parent = el.parentElement;
+        if (!parent) continue;
+        const pt = oneLine(cleanText(parent));
+        if (pt.length > 48) continue;                  // 表头 / 长句不是信息条
+        const money = moneyTokens(pt).filter((m) => !isSignedMoney(m));
+        if (!money.length) continue;
+        const v = moneyValue(money[0]);
+        if (v > 0) return { usd: v, src: 'bar' };
+      }
+    } catch (_) { /* 落到标题兜底 */ }
+    try {
+      const m = /^\s*(\$[\d,]+(?:\.\d+)?[KMBkmb]?)\s*MC\b/.exec(document.title || '');
+      if (m) { const v = moneyValue(m[1]); if (v > 0) return { usd: v, src: 'title' }; }
+    } catch (_) { /* 忽略 */ }
+    return null;
+  }
+
+  /** fomo 持有人总数：优先当前激活且可见的 Holders 标签，再从其它可见标题取最大。 */
+  function fomoHolderTotal() {
+    try {
+      let best = null; let activeBest = null;
+      let n = 0;
+      for (const el of document.querySelectorAll('button, [role="tab"], div, span, h1, h2, h3')) {
+        if (++n > 8000) break;
+        if (el.childElementCount > 2) continue;
+        if (!visibleElement(el)) continue;
+        const t = el.textContent || '';
+        if (t.length > 32) continue;
+        const m = HOLDERS_COUNT_RE.exec(t);
+        if (!m) continue;
+        const v = parseInt(m[1].replace(/,/g, ''), 10);
+        if (!Number.isFinite(v) || v <= 0) continue;
+        if (best == null || v > best) best = v;
+        const cls = String(el.className || '');
+        const active = el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-state') === 'active'
+          || /(?:^|\s)(?:active|selected|on|text-text-primary)(?:\s|$)/.test(cls);
+        if (active && (activeBest == null || v > activeBest)) activeBest = v;
+      }
+      return activeBest == null ? best : activeBest;
+    } catch (_) { return null; }
+  }
+
+  /** 全表合计 ÷ 市值 → { pct, sumUsd, mcUsd, mcSrc, counted, total, lower, tier } 或 null（算不出 / 对不上）。 */
+  function computeFomoShare(parsed) {
+    let sum = 0;
+    let counted = 0;
+    for (const r of parsed || []) {
+      const v = moneyValue(r && r.positionUsd);
+      if (!(v > 0)) continue;
+      sum += v;
+      counted++;
+    }
+    if (!counted) { shareReject = 'no-rows'; return null; }
+    const mc = readMarketCap();
+    if (!mc || !(mc.usd > 0)) { shareReject = 'no-mc'; return null; }
+    const pct = sum / mc.usd * 100;
+    if (!isFinite(pct) || pct <= 0) { shareReject = 'bad-pct'; return null; }
+    if (pct > 100) { shareReject = 'over100'; return null; }   // 合计超过市值 = 市值抓错了，宁可不显示（原因进诊断）
+    shareReject = '';
+    const total = fomoHolderTotal();
+    return {
+      pct: Math.round(pct * 10) / 10, sumUsd: sum, mcUsd: mc.usd, mcSrc: mc.src,
+      counted, total, lower: total == null || counted < total,
+      tier: pct >= SHARE_STRONG_PCT ? 'strong' : (pct >= SHARE_BUY_PCT ? 'buy' : 'low'),
+    };
   }
 
   // ---- Thesis 抓取（v0.7.4：改读 Holders 表的 "Thesis" 列）--------------------
@@ -2883,12 +3404,13 @@ details.tweets > summary { color: #9aa0aa; }
     try {
       return st.status + '|' + (st.holdersPresent ? 1 : 0)
         + '|' + (st.friendsOnly === true ? 'F' : st.friendsOnly === false ? 'f' : 'u') + '|' + (st.bottomTab || '-') + (st.translated ? '|T' : '')
-        + '|' + JSON.stringify(st.data) + '|' + JSON.stringify(st.feed || null);
+        + '|' + JSON.stringify(st.data) + '|' + JSON.stringify(st.share || null) + '|' + JSON.stringify(st.feed || null);
     }
     catch (_) { return 'nofp:' + Date.now(); }   // 指纹算不出就当变了，宁可多画一次
   }
 
   function scanScrapers(seq, ca, chain) {
+    if (!SITE.scrape) return;
     if (seq !== state.seq) return;
     const prevHolders = state.holders;
     const prevThesis = state.thesis;
@@ -2896,8 +3418,13 @@ details.tweets > summary { color: #9aa0aa; }
     // K3 审查 F2：一轮只扫一遍 Holders 表，holders/thesis 共用（原先各扫一遍 + 列头再扫一遍）
     let rowEls = [];
     try { rowEls = collectHolderRows(); } catch (_) { rowEls = []; }
+    // v0.9.10：整表只解析一次——前 6 名给 Holders 页，全表合计给「Fomo 持仓占比」
+    let parsedAll = [];
+    try { parsedAll = parseHoldersGuarded(rowEls); } catch (_) { parsedAll = []; }
     let holders = [];
-    try { holders = scrapeHolders(rowEls); } catch (_) { holders = []; }
+    try { holders = topHolders(parsedAll); } catch (_) { holders = []; }
+    let share = null;
+    try { share = computeFomoShare(parsedAll); } catch (_) { share = null; }
 
     // v0.7.4：thesis 改读同一张 Holders 表的 "Thesis" 列。空态要分清两种情形——
     // 表压根没渲染出来（懒加载）→ 提示滚动 Holders 表；表在但没人写 thesis → 另一句话。
@@ -2916,7 +3443,7 @@ details.tweets > summary { color: #9aa0aa; }
     // 抖动保护（v0.8.2）：这轮扫空、但本币已有成品数据 → 保留旧数据不清屏。
     // fomo 翻页/切自家 tab/虚拟滚动都可能让表暂时从 DOM 消失，不是"数据没了"。
     state.holders = holders.length
-      ? { status: 'ready', data: holders, error: null }
+      ? { status: 'ready', data: holders, error: null, share }
       : (prevHolders && prevHolders.status === 'ready' ? prevHolders
         : { status: 'empty', data: null, error: null, friendsOnly, bottomTab, translated });
     const feed = (th && Array.isArray(th.feed)) ? th.feed : [];
@@ -2935,6 +3462,7 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function startScrapers(seq, ca, chain) {
+    if (!SITE.scrape) return;   // 页签都没长，观察者/定时器一个也别起
     stopScrapers();
     const run = () => scanScrapers(seq, ca, chain);
     run(); // 立刻扫一次（多半还没渲染出来）
@@ -2955,11 +3483,224 @@ details.tweets > summary { color: #9aa0aa; }
   /** 刷新钮 / 重新聚焦卡片：立刻重扫一次页面，不必等下一个 tick。 */
   let lastRescanAt = 0;
   function rescanNow(force) {
+    if (!SITE.scrape) return;
     if (!state.open || !state.ca) return;
     const now = Date.now();
     if (!force && now - lastRescanAt < 2000) return; // 鼠标反复进出不该反复全页扫描
     lastRescanAt = now;
     startScrapers(state.seq, state.ca, state.chain);
+  }
+
+  // ---------- xxyy → fomo 登录态镜像 ----------
+  // 数据仍由 fomo 自己的页面渲染，本扩展只把同一张表裁成卡片已经使用的字段。
+  // 不读 cookie/localStorage，不回传 DOM/vnode，也不接收任意 URL。
+  const FOMO_LOGIN_RE = /^(?:log\s*in|login|sign\s*in|connect\s*wallet|登录|登入|连接钱包)$/i;
+  const FOMO_MIRROR_COUNT_RE = new RegExp('^\\s*' + alt(L10N.holders, true) + '\\s*[（(]\\s*([\\d,]+)\\s*[)）]\\s*$', 'i');
+  const FOMO_MIRROR_ROUTE_SETTLE_MS = 700;
+  let fomoMirrorRouteKey = '';
+  let fomoMirrorRouteSince = 0;
+  let fomoMirrorAuthKey = '';
+  let fomoMirrorAuthStreak = 0;
+
+  function visibleElement(el) {
+    try {
+      if (!el || !el.getClientRects || !el.getClientRects().length) return false;
+      // getClientRects 已能挡住 display:none 的祖先；checkVisibility 再挡 content-visibility/
+      // visibility 隐藏。旧 Chromium 不认识 options 时，保守回落到 rect + computed style。
+      if (typeof el.checkVisibility === 'function') {
+        try {
+          if (!el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) return false;
+        } catch (_) { /* 旧实现继续走下面的兼容判断 */ }
+      }
+      const css = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+      return !css || (css.display !== 'none' && css.visibility !== 'hidden' && css.visibility !== 'collapse');
+    } catch (_) { return false; }
+  }
+
+  function fomoLoginVisible() {
+    try {
+      let seen = 0;
+      for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+        if (++seen > 4000) break;
+        const t = oneLine(el.textContent);
+        if (t.length <= 32 && FOMO_LOGIN_RE.test(t) && visibleElement(el)) return true;
+      }
+    } catch (_) { /* 判不出就继续等，不把故障冒充未登录 */ }
+    return false;
+  }
+
+  /** 只用于识别明确的 Holders (0) 空表；正数但行没渲染时继续等。 */
+  function fomoMirrorHolderCount() {
+    let best = null; let activeBest = null;
+    try {
+      let seen = 0;
+      for (const el of document.querySelectorAll('button, [role="tab"], div, span, h1, h2, h3')) {
+        if (++seen > 8000) break;
+        if (el.childElementCount > 2) continue;
+        if (!visibleElement(el)) continue;
+        const t = el.textContent || '';
+        if (t.length > 32) continue;
+        const m = FOMO_MIRROR_COUNT_RE.exec(t);
+        if (!m) continue;
+        const n = parseInt(m[1].replace(/,/g, ''), 10);
+        if (!Number.isFinite(n) || n < 0) continue;
+        if (best == null || n > best) best = n;
+        const cls = String(el.className || '');
+        const active = el.getAttribute('aria-selected') === 'true' || el.getAttribute('data-state') === 'active'
+          || /(?:^|\s)(?:active|selected|on|text-text-primary)(?:\s|$)/.test(cls);
+        if (active && (activeBest == null || n > activeBest)) activeBest = n;
+      }
+    } catch (_) { return null; }
+    return activeBest == null ? best : activeBest;
+  }
+
+  /** 新开的专用后台页若记住了 Swaps/Thesis，切回 Holders；只点同组精确标签。 */
+  function activateFomoHoldersForMirror() {
+    try {
+      const buttons = Array.from(document.querySelectorAll('button, [role="tab"]'));
+      const holders = buttons.filter((b) => {
+        const t = oneLine(b.textContent);
+        return t.length <= 32 && TAB_HOLDERS_RE.test(t) && visibleElement(b);
+      });
+      for (const b of holders) {
+        let root = b.parentElement;
+        for (let up = 0; up < 5 && root && root !== document.body; up++, root = root.parentElement) {
+          const group = buttons.filter((x) => root.contains(x)).map((x) => oneLine(x.textContent));
+          const hasPeer = group.some((t) => TAB_SWAPS_RE.test(t)) || group.some((t) => TAB_THESIS_RE.test(t));
+          if (!hasPeer) continue;
+          if (fomoBottomTab() !== 'holders') b.click();
+          return true;
+        }
+      }
+    } catch (_) { /* 继续靠滚动/重试 */ }
+    return false;
+  }
+
+  function prepareFomoMirrorPage() {
+    activateFomoHoldersForMirror();
+    try {
+      const holders = Array.from(document.querySelectorAll('h1, h2, h3, div, button')).find((el) => {
+        const t = oneLine(el.textContent);
+        return t.length <= 32 && FOMO_MIRROR_COUNT_RE.test(t) && visibleElement(el);
+      });
+      if (holders && holders.scrollIntoView) holders.scrollIntoView({ block: 'center', behavior: 'auto' });
+      else window.scrollTo(0, Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight));
+    } catch (_) { /* 下一轮再试 */ }
+  }
+
+  const fomoChainKey = (v) => ({ sol: 'solana', bnb: 'bsc', eth: 'ethereum', robin: 'robinhood' }[String(v || '').toLowerCase()]
+    || String(v || '').toLowerCase());
+  const snapStr = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const snapshotHolder = (r) => ({
+    handle: snapStr(r && r.handle, 32), positionUsd: snapStr(r && r.positionUsd, 32),
+    avgEntry: snapStr(r && r.avgEntry, 32), pnl: snapStr(r && r.pnl, 32),
+    pnlPos: r && r.pnlPos === true ? true : (r && r.pnlPos === false ? false : null),
+    avgHold: snapStr(r && r.avgHold, 40),
+  });
+  const snapshotThesis = (r) => ({
+    handle: snapStr(r && r.handle, 32), text: snapStr(r && r.text, 4000),
+    url: safeHttps(r && r.url) || '', likes: Math.max(0, Math.min(1000000, Math.floor(Number(r && r.likes) || 0))),
+    time: snapStr(r && r.time, 40),
+    ageMin: r && r.ageMin != null && Number.isFinite(Number(r.ageMin)) && Number(r.ageMin) >= 0
+      ? Math.min(5256000, Number(r.ageMin)) : null,
+    positionUsd: snapStr(r && r.positionUsd, 32), pnl: snapStr(r && r.pnl, 32),
+    pnlPos: r && r.pnlPos === true ? true : (r && r.pnlPos === false ? false : null),
+  });
+
+  /** Validate the actual position/cap ratio; a real tiny holding can round to 0.0%. */
+  function snapshotFomoShare(r) {
+    if (!r || typeof r !== 'object') return null;
+    const pct = Number(r.pct); const sumUsd = Number(r.sumUsd); const mcUsd = Number(r.mcUsd);
+    const counted = Math.floor(Number(r.counted));
+    const totalRaw = r.total == null ? null : Math.floor(Number(r.total));
+    if (!Number.isFinite(pct) || !Number.isFinite(sumUsd) || !Number.isFinite(mcUsd)
+        || !Number.isFinite(counted) || !(pct >= 0 && pct <= 100 && sumUsd > 0 && mcUsd > 0 && counted > 0)) return null;
+    const rawPct = sumUsd / mcUsd * 100;
+    const roundedPct = Math.round(rawPct * 10) / 10;
+    if (!(rawPct > 0 && rawPct <= 100) || pct !== roundedPct) return null;
+    const total = Number.isFinite(totalRaw) && totalRaw >= counted ? totalRaw : null;
+    return {
+      pct: Math.round(pct * 10) / 10, sumUsd, mcUsd, mcSrc: snapStr(r.mcSrc, 16),
+      counted, total, lower: r.lower === true || total == null || counted < total,
+    };
+  }
+
+  function resetFomoMirrorAuth() {
+    fomoMirrorAuthKey = '';
+    fomoMirrorAuthStreak = 0;
+  }
+
+  /**
+   * 后台每只币都新开独立 inactive tab，不复用上一只币的 SPA 文档；这里仍等路由稳定
+   * 700ms，避免刚导航/重定向时拿到 hydration 中间态。
+   */
+  function fomoMirrorRouteSettled(ca, chain, here) {
+    const key = chain + '|' + (isHex(ca) ? ca.toLowerCase() : ca);
+    if (!here || !sameCa(here.ca, ca) || fomoChainKey(here.chain) !== chain) {
+      fomoMirrorRouteKey = '';
+      fomoMirrorRouteSince = 0;
+      resetFomoMirrorAuth();
+      return false;
+    }
+    if (fomoMirrorRouteKey !== key) {
+      fomoMirrorRouteKey = key;
+      fomoMirrorRouteSince = Date.now();
+      resetFomoMirrorAuth();
+      return false;
+    }
+    return Date.now() - fomoMirrorRouteSince >= FOMO_MIRROR_ROUTE_SETTLE_MS;
+  }
+
+  function buildFomoMirrorSnapshot(msg) {
+    if (SITE.id !== 'fomo') return { status: 'unavailable' };
+    const prepare = () => { if (msg && msg.readOnly !== true) prepareFomoMirrorPage(); };
+    const ca = msg && typeof msg.ca === 'string' ? msg.ca.trim() : '';
+    const chain = fomoChainKey(msg && msg.chain);
+    if (!ADDR_RE.test(ca) || !chain) return { status: 'unavailable' };
+    const here = parsePath(location.pathname);
+    if (!fomoMirrorRouteSettled(ca, chain, here)) {
+      prepare();
+      return { status: 'pending' };
+    }
+
+    let rowEls = [];
+    try { rowEls = collectHolderRows(); } catch (_) { rowEls = []; }
+    if (!rowEls.length) {
+      // 持仓行优先于登录按钮：Privy/页头可能残留 Connect Wallet，不能盖掉已登录的真表。
+      // 真登录页还要 document complete + 连续两轮都看见精确按钮，hydration 闪一下不算。
+      const loginVisible = document.readyState === 'complete' && fomoLoginVisible();
+      const authKey = chain + '|' + (isHex(ca) ? ca.toLowerCase() : ca);
+      if (loginVisible) {
+        if (fomoMirrorAuthKey === authKey) fomoMirrorAuthStreak++;
+        else { fomoMirrorAuthKey = authKey; fomoMirrorAuthStreak = 1; }
+        if (fomoMirrorAuthStreak >= 2) return { status: 'auth_required' };
+        prepare();
+        return { status: 'pending' };
+      }
+      resetFomoMirrorAuth();
+      const count = fomoMirrorHolderCount();
+      if (document.readyState === 'complete' && count === 0) {
+        return { status: 'ready', holders: [], thesis: [], feed: [], share: null };
+      }
+      prepare();
+      return { status: 'pending' };
+    }
+
+    resetFomoMirrorAuth();
+    let parsed = []; let thesis = { rows: [], feed: [] }; let share = null;
+    try { parsed = parseHoldersGuarded(rowEls); } catch (_) { parsed = []; }
+    try { thesis = scrapeThesis(rowEls); } catch (_) { thesis = { rows: [], feed: [] }; }
+    try { share = computeFomoShare(parsed); } catch (_) { share = null; }
+    if (!parsed.length) { prepare(); return { status: 'pending' }; }
+    const feed = thesis && Array.isArray(thesis.feed) ? thesis.feed : [];
+    return {
+      status: 'ready',
+      holders: topHolders(parsed).slice(0, HOLDER_SHOW).map(snapshotHolder),
+      thesis: (thesis && Array.isArray(thesis.rows) ? thesis.rows : []).slice(0, THESIS_TAB_SHOW).map(snapshotThesis),
+      thesisTotal: thesis && Array.isArray(thesis.rows) ? thesis.rows.length : 0,
+      feed: feed.slice(0, 60).map(snapshotThesis),
+      share: snapshotFomoShare(share),
+    };
   }
 
   // ---------- 三个新段的渲染 ----------
@@ -3106,6 +3847,32 @@ details.tweets > summary { color: #9aa0aa; }
     slot.appendChild(box);
   }
 
+  function appendFomoLink(body, rawUrl, label) {
+    const url = safeFomoPayloadUrl(rawUrl, true);
+    if (!url) return;
+    body.appendChild(h('a', {
+      cls: 'rlink', text: label, href: url,
+      attrs: { target: '_blank', rel: 'noopener noreferrer' },
+    }));
+  }
+
+  /** 登录态缺失与临时读取失败是两种明确状态；两者都 fail-closed，不画空持仓/0%。 */
+  function renderFomoMirrorGate(body, st) {
+    if (!st || st.source !== 'fomo-mirror') return false;
+    if (st.status !== 'auth_required' && st.status !== 'unavailable') return false;
+    const auth = st.status === 'auth_required';
+    body.appendChild(h('div', { cls: 'grey', text: auth ? tr('fomoLogin') : tr('fomoUnavailable') }));
+    appendFomoLink(body, st.fomoUrl, auth ? tr('fomoLoginAction') : tr('fomoOpenAction'));
+    return true;
+  }
+
+  function renderUnresolvedPool(body) {
+    if (!state.resolveFailed || !isXxyyPoolRef(state.ca)) return false;
+    body.textContent = '';
+    body.appendChild(h('div', { cls: 'grey', text: tr('resolveTokenFailed') }));
+    return true;
+  }
+
   /**
    * 持仓者页（v0.8 第三个标签）：渲染从页面 DOM 抓来的持仓行。
    * 标签页本身就是容器，段级折叠已移除；渲染不看标签是否可见，切过去内容已在。
@@ -3117,17 +3884,33 @@ details.tweets > summary { color: #9aa0aa; }
     const st = state.holders;
     const rows = (st.status === 'ready' && Array.isArray(st.data)) ? st.data : [];
     setTabCount('holders', rows.length);
+    renderShare();   // v0.9.10：与持仓表同源同步，表变它就变
 
+    if (renderUnresolvedPool(body) || renderFomoMirrorGate(body, st)) return;
     if (st.status === 'scanning' || st.status === 'idle') {
       // 首扫多半空，别急着显示灰字；等重扫。仍占位一行淡字。
-      body.appendChild(h('div', { cls: 'grey', text: tr('readingHolders') }));
+      body.appendChild(h('div', { cls: 'grey', text: state.resolving ? tr('resolvingToken') : SITE.fomoMirror ? tr('fomoReading') : tr('readingHolders') }));
       return;
     }
     if (!rows.length) {
+      if (st.source === 'fomo-mirror') {
+        body.appendChild(h('div', { cls: 'grey', text: tr('fomoNoHolders') }));
+        appendFomoLink(body, st.fomoUrl, tr('fomoOpenAction'));
+        return;
+      }
       body.appendChild(h('div', { cls: 'grey',
         text: emptyScrapeHint(tr('scrollHolders'), st.friendsOnly, st.bottomTab, st.translated) }));
       body.appendChild(diagButton());
       return;
+    }
+
+    // v0.9.10：页顶一行合计（头部那行的详细版：合计 / 市值 / 榜单覆盖）
+    if (st.share) {
+      body.appendChild(h('div', { cls: 'share-sum', title: tr('shareTip') }, [
+        h('span', { text: tr('shareLabel') + ' ' }),
+        h('span', { cls: 'share-pct ' + st.share.tier, text: sharePctText(st.share) }),
+        h('span', { text: ' · ' + shareDetail(st.share) }),
+      ]));
     }
 
     // 行格式（v0.8.8 主人定稿）：@名字 · $仓位 ▲盈亏% · 持有 2d 4h ——
@@ -3154,6 +3937,36 @@ details.tweets > summary { color: #9aa0aa; }
       item.appendChild(rh);
       body.appendChild(item);
     }
+  }
+
+  // ---- Fomo 持仓占比渲染（v0.9.10）：头部独占一行，Holders 页顶再给详细版 ----
+  function sharePctText(sh) {
+    return (sh.lower ? '≥' : '') + sh.pct.toFixed(1) + '%';
+  }
+  function shareDetail(sh) {
+    const cover = sh.total != null ? (sh.counted + '/' + sh.total) : String(sh.counted);
+    return tr('shareTotal') + fmtUsdShort(sh.sumUsd) + tr('shareMc') + fmtUsdShort(sh.mcUsd) + ' · ' + tr('shareCover') + cover;
+  }
+  function fmtUsdShort(v) {
+    const n = Number(v) || 0;
+    const f = (x, d) => x.toFixed(d).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+    if (n >= 1e9) return '$' + f(n / 1e9, 2) + 'B';
+    if (n >= 1e6) return '$' + f(n / 1e6, 2) + 'M';
+    if (n >= 1e3) return '$' + f(n / 1e3, 1) + 'K';
+    return '$' + Math.round(n);
+  }
+  function renderShare() {
+    if (!els || !els.shareRow) return;
+    const row = els.shareRow;
+    row.textContent = '';
+    const sh = state.holders && state.holders.share;
+    if (!HAS_FOMO_DATA || !sh) { row.hidden = true; return; }
+    row.appendChild(h('span', { cls: 'share-k', text: tr('shareLabel') }));
+    row.appendChild(h('span', { cls: 'share-pct ' + sh.tier, text: sharePctText(sh) }));
+    if (sh.tier !== 'low') row.appendChild(h('span', { cls: 'share-tag ' + sh.tier, text: sh.tier === 'strong' ? '★★' : '★' }));
+    row.appendChild(h('span', { cls: 'share-sub', text: shareDetail(sh) }));
+    row.title = tr('shareTip');
+    row.hidden = false;
   }
 
   /** 盈亏配色三分支：true 绿 / false 红 / 判不出方向不配色（不许默认当赚，K3 审查修正）。 */
@@ -3277,13 +4090,21 @@ details.tweets > summary { color: #9aa0aa; }
     body.textContent = '';
     const st = state.thesis;
     const rows = (st.status === 'ready' && Array.isArray(st.data)) ? st.data : [];
-    setTabCount('views', rows.length);
+    const totalCount = st.source === 'fomo-mirror' && Number.isSafeInteger(st.totalCount)
+      && st.totalCount >= rows.length ? st.totalCount : rows.length;
+    setTabCount('views', totalCount);
 
+    if (renderUnresolvedPool(body) || renderFomoMirrorGate(body, st)) return;
     if (st.status === 'scanning' || st.status === 'idle') {
-      body.appendChild(h('div', { cls: 'grey', text: tr('readingTable') }));
+      body.appendChild(h('div', { cls: 'grey', text: state.resolving ? tr('resolvingToken') : SITE.fomoMirror ? tr('fomoReading') : tr('readingTable') }));
       return;
     }
     if (!rows.length) {
+      if (st.source === 'fomo-mirror') {
+        body.appendChild(h('div', { cls: 'grey', text: st.holdersPresent ? tr('noThesis') : tr('fomoNoHolders') }));
+        appendFomoLink(body, st.fomoUrl, tr('fomoOpenAction'));
+        return;
+      }
       // 表在但没人写 thesis → 一句话；表压根没渲染（懒加载）→ 与持仓者同一句"滚到可见"
       body.appendChild(h('div', { cls: 'grey', text: emptyScrapeHint(st.holdersPresent
         ? tr('noThesis')
@@ -3340,10 +4161,11 @@ details.tweets > summary { color: #9aa0aa; }
       body.appendChild(item);
     }
     // 角标报的是真实条数；超上限时明说截断了，不许"看着像全量"
-    if (shown.length > THESIS_TAB_SHOW) {
+    const shownCount = state.thesisSort === 'time' ? shown.length : totalCount;
+    if (shownCount > THESIS_TAB_SHOW) {
       body.appendChild(h('div', { cls: 'muted',
         text: (state.thesisSort === 'time' ? tr('capNewest') : tr('capLikes'))
-          + THESIS_TAB_SHOW + tr('capTail') + shown.length + tr('capEnd') }));
+          + THESIS_TAB_SHOW + tr('capTail') + shownCount + tr('capEnd') }));
     }
     refreshLangBtn();
     translation.autoEnable();
@@ -3364,7 +4186,7 @@ details.tweets > summary { color: #9aa0aa; }
       ? state.history.source_tweets.length : 0;
     // full 布局默认展开，compact/预览默认收起；用户手动开合写回 state 以跨重渲染保持
     const det = h('details', { cls: 'sec tweets', attrs: state.tweetsOpen ? { open: '' } : {} });
-    det.addEventListener('toggle', () => { state.tweetsOpen = det.open; });
+    listen(det, 'toggle', () => { state.tweetsOpen = det.open; });
     det.appendChild(h('summary', {
       cls: 'sectitle',
       text: tr('tweets') + (total ? tr('tweetsN') + total + tr('tweetsNEnd') : ''),
@@ -3424,36 +4246,113 @@ details.tweets > summary { color: #9aa0aa; }
     path = path.split('?')[0].split('#')[0];
     const m = TOKEN_PATH_RE.exec(path);
     if (!m) return null;
-    return { chain: m[1], ca: m[2] };
+    if (SITE.id === 'xxyy' && !ADDR_RE.test(m[2]) && !XXYY_POOL_ID_RE.test(m[2])) return null;
+    // 路径链 slug → DexScreener chainId（xxyy: sol→solana / eth→ethereum；没映射的原样透传）
+    const slug = String(m[1]).toLowerCase();
+    return { chain: (SITE.chainMap && SITE.chainMap[slug]) || slug, ca: m[2] };
   }
+
+  /**
+   * v0.9.10：URL 代币 → 开卡的唯一入口（自动弹出 / 轮询换币 / 点链接快切 / 圆钮 / 预览退场都走这里）。
+   * fomo 直接开；xxyy 这类站点（SITE.resolveAddr）URL 上挂的是池子地址（实测 /sol/<mint> 会被
+   * 302 成 /sol/<pool>），DeBot / DexScreener 都按代币 CA 取数，所以先让后台反解一次再开卡。
+   * 反解失败就按原地址开（DeBot 会如实说未收录），绝不让卡片因为反解挂掉而不出现。
+   */
+  const resolveCache = new Map();   // 'chain|addr' → 代币 CA（content script 存活期内）
+  // URL 自动开卡与悬停预览是两条独立 lane：悬停绝不能取消尚在反解的当前 URL。
+  const resolveSeq = { url: 0, preview: 0 };
+  /**
+   * v0.9.12：URL 开卡与悬停预览共用同一条"先反解再 load"的路（mode = 'url' | 'preview'）。
+   * 预览分支的过期判定看 hoverPendingCa——等反解那几百毫秒里鼠标已经离开这一行，就别再把卡弹出来。
+   */
+  function openToken(tok, mode, force = false) {
+    if (!tok || !tok.ca) return;
+    const lane = mode === 'preview' ? 'preview' : 'url';
+    // 站点不需要反解、或这条命中本来就是代币 CA（Vue 探针读到 tokenAddress）→ 直接开
+    if (!SITE.resolveAddr || (tok.resolved && ADDR_RE.test(tok.ca))) {
+      resolveSeq[lane]++;
+      state.resolveFailed = false;
+      state.srcAddr = tok.ca;
+      load(tok.ca, tok.chain, mode, force);
+      return;
+    }
+    const key = String(tok.chain || '') + '|' + (isHex(tok.ca) || isXxyyPoolRef(tok.ca) ? tok.ca.toLowerCase() : tok.ca);
+    const hit = resolveCache.get(key);
+    if (hit) {
+      resolveSeq[lane]++;
+      state.resolveFailed = false;
+      state.srcAddr = tok.ca;
+      load(hit, tok.chain, mode, force);
+      return;
+    }
+    const my = ++resolveSeq[lane];
+    state.resolveFailed = false;
+    state.srcAddr = tok.ca;
+    load(tok.ca, tok.chain, mode, false, true);
+    const displaySeq = state.seq;
+    requestResolve(tok.ca, tok.chain, (resp) => {
+      if (my !== resolveSeq[lane]) return;                             // 同一 lane 已经换币
+      if (mode === 'url' && !sameToken(urlToken, tok)) return;         // 等反解期间已离开/切链/换币
+      if (mode === 'preview' && !sameToken({ ca: hoverPendingCa, chain: hoverPendingChain }, tok)) return;
+      const ok = !!(resp && resp.ok && resp.payload && typeof resp.payload.ca === 'string' && ADDR_RE.test(resp.payload.ca));
+      const ca = ok ? resp.payload.ca : tok.ca;
+      // Kimi 审查 F1：反解失败（网络抖动/后台无响应）按原地址开卡但**不缓存**，下次换币/↻ 重新反解
+      if (ok) {
+        if (resolveCache.size > 200) resolveCache.clear();
+        resolveCache.set(key, ca);
+      }
+      // Keep the resolved identity for later, but a newer preview owns the visible card.
+      if (state.seq !== displaySeq) return;
+      state.resolveFailed = !ok;
+      state.srcAddr = tok.ca;
+      if (!ok && isXxyyPoolRef(tok.ca)) {
+        state.resolving = false;
+        state.status = 'error';
+        state.holders = { status: 'error', data: null, error: null };
+        state.thesis = { status: 'error', data: null, error: null };
+        state.pairs = { status: 'error', data: null, error: null };
+        state.analysis = { status: 'disabled', data: null, error: null };
+        paintChrome(); paintHeader(); renderPairs(); renderDebot(); renderKol(); renderThesis(); renderAnalysis();
+        return;
+      }
+      load(ca, tok.chain, mode, force);
+    });
+  }
+  const openFromUrl = (tok) => openToken(tok, 'url');
 
   function onUrlMaybeChanged() {
     const next = parsePath(location.pathname);
-    const changed = (next && next.ca) !== (urlToken && urlToken.ca);
+    const changed = !((!next && !urlToken) || sameToken(next, urlToken));
     if (!changed) return;
+    cancelHoverDwell();
+    resolveSeq.url++;
+    resolveSeq.preview++;
     urlToken = next;
 
     // 离开代币页：卡片上那只旧币已经不是"当前聚焦的币"了，别继续摆着
     if (!next) {
-      if (state.open && state.mode === 'url' && !state.pinned) closeCard();
+      if (state.open && !state.pinned) closeCard();
       return;
     }
-    if (autoOpenEnabled() || state.open) load(next.ca, next.chain, 'url', false);
+    if (autoOpenEnabled() || state.open) openFromUrl(next);
   }
 
   /**
    * 点击左栏代币行/任何 /tokens/ 链接：不等那 250ms 轮询，立刻切到新币。
    * 这是"进新币先看到上一只币"的主路径修复——轮询只是兜底。
    */
-  function fastSwitchFromClick(target) {
+  function fastSwitchFromClick(target, event) {
     let a = null;
-    try { a = target.closest && target.closest('a[href*="/tokens/"]'); } catch (_) { return false; }
+    try { a = target.closest && target.closest(SITE.tokenLinkSel); } catch (_) { return false; }
     if (!a) return false;
+    if ((event && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0))
+        || (a.target && a.target.toLowerCase() !== '_self') || a.hasAttribute('download')) return false;
     const hit = anchorToken(a);
     if (!hit || !hit.ca) return false;
-    if (state.open && sameCa(hit.ca, state.ca) && state.mode === 'url') return true; // 已经是这只币
+    // 已经是这只币（xxyy 上 URL 挂的是池子地址，与反解后的 state.ca 不同，所以拿 srcAddr 比）
+    if (state.open && state.mode === 'url' && isCurrentToken(hit)) return true;
     urlToken = hit;
-    if (autoOpenEnabled() || state.open) load(hit.ca, hit.chain, 'url', false);
+    if (autoOpenEnabled() || state.open) openFromUrl(hit);
     return true;
   }
 
@@ -3474,16 +4373,20 @@ details.tweets > summary { color: #9aa0aa; }
       }
     } catch (_) { /* 忽略 */ }
 
-    window.addEventListener(LOC_EVENT, onUrlMaybeChanged);
-    window.addEventListener('popstate', onUrlMaybeChanged);
-    setInterval(onUrlMaybeChanged, URL_POLL_MS);
+    listen(window, LOC_EVENT, onUrlMaybeChanged);
+    listen(window, 'popstate', onUrlMaybeChanged);
+    // Reuse the navigation tick: GMGN's tracker can mount after the card or be
+    // resized independently. Only an un-dragged card follows its actual bounds.
+    setInterval(() => { onUrlMaybeChanged(); refreshGmgnDock(); }, URL_POLL_MS);
   }
 
   // ---------- 悬停解析 ----------
   function anchorToken(a) {
-    let p = a.getAttribute('href') || '';
-    try { p = new URL(p, location.origin).pathname; } catch (_) { /* 相对路径直接用 */ }
-    return parsePath(p);
+    try {
+      const u = new URL(a.getAttribute('href') || '', location.href);
+      if (u.origin !== location.origin) return null;
+      return parsePath(u.pathname);
+    } catch (_) { return null; }
   }
 
   /**
@@ -3492,24 +4395,24 @@ details.tweets > summary { color: #9aa0aa; }
    * 此时宁可解析不出，也绝不拿第一个链接顶包（否则悬停任意空白处都会误报邻行的币）。
    */
   function resolveByAnchor(target) {
-    const direct = target.closest && target.closest('a[href*="/tokens/"]');
+    const direct = target.closest && target.closest(SITE.tokenLinkSel);   // v0.9.11：链接形状按站点表走（fomo 仍是 /tokens/）
     if (direct) {
       const hit = anchorToken(direct);
       if (hit) return hit;
     }
     let node = target;
     for (let i = 0; i < 6 && node; i++, node = node.parentElement) {
-      if (node.matches && node.matches('a[href*="/tokens/"]')) {
+      if (node.matches && node.matches(SITE.tokenLinkSel)) {
         const hit = anchorToken(node);
         if (hit) return hit;
       }
       if (!node.querySelectorAll) continue;
       const found = [];
       const seen = Object.create(null);
-      for (const a of node.querySelectorAll('a[href*="/tokens/"]')) {
+      for (const a of node.querySelectorAll(SITE.tokenLinkSel)) {
         const hit = anchorToken(a);
         if (!hit) continue;
-        const key = isHex(hit.ca) ? hit.ca.toLowerCase() : hit.ca;
+        const key = hit.chain + '|' + (isHex(hit.ca) ? hit.ca.toLowerCase() : hit.ca);
         if (seen[key]) continue;
         seen[key] = 1;
         found.push(hit);
@@ -3574,18 +4477,254 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function resolveHovered(target, clientX) {
+    if (!SITE.hover) return null;   // 悬停解析按 fomo 版式调的（左侧区域限定 + fiber 探针），别的站不开
     if (!target || !target.closest) return null;
     // 只在左侧区域做解析，避免全页扫描开销
-    if (clientX >= window.innerWidth * LEFT_ZONE_RATIO) return null;
+    if (clientX >= window.innerWidth * (SITE.hoverZone || LEFT_ZONE_RATIO)) return null;   // 悬停区按站点表（xxyy/gmgn 左栏更宽）
     // 页脚 / 导航里的 /tokens/ 快捷链接（BTC、SOL 行情位）不是"聚焦的币"
     if (target.closest('footer, nav, [role="navigation"]')) return null;
+    if (SITE.hover === 'anchor' || SITE.hover === 'gmgn-react') return resolveByAnchor(target);
+    // 真扩展里 content script 在 ISOLATED world，直读 #app._vnode 永远是空。
+    // 只有 main-world 测试夹具保留同步探针；生产走 background + scripting MAIN 的坐标探针。
+    if (SITE.hover === 'vue') return resolveByAnchor(target) || (TEST ? resolveByVue(target) : null);
     return resolveByAnchor(target) || resolveByFiber(target);
   }
 
   /** 悬停目标 → 它所属的"行"容器（行内所有子元素共享同一个），用来判断是否换了行。 */
   function hoverRowOf(target) {
-    try { return (target.closest && target.closest('a, li, tr, div')) || target; }
-    catch (_) { return target; }
+    try {
+      if (SITE.hover === 'vue') { const vr = stableXxyyRow(target); if (vr) return vr; }
+      if (SITE.rowSel && target.closest) { const r = target.closest(SITE.rowSel); if (r) return r; }   // v0.9.12：站点给了行选择器就按整行算
+      return (target.closest && target.closest('a, li, tr, div')) || target;
+    } catch (_) { return target; }
+  }
+
+  // ---------- 策略 c：Vue 3 vnode 树探针（v0.9.12，xxyy）----------
+  // xxyy 是 Vue 3 生产版：元素上不挂组件实例（__vueParentComponent 是开发版才有的），行也不是链接，
+  // 锚点 / React fiber 两套解析在它上面全是瞎的。但根容器 #app._vnode 在任何构建里都在
+  //（渲染器 render() 末尾 container._vnode = vnode）。2026-09-05 台湾出口实测：从根往下 1737 个
+  // vnode / 5ms 走到悬停行，所属组件 DynamicScrollerItem 的 props.item 里就有 tokenAddress（代币 CA）
+  // 与 pairAddress（池子）——拿 tokenAddress 直接开卡，连反解都省了。
+  const VUE_CHAIN_IDS = { 1: 'ethereum', 56: 'bsc', 8453: 'base', 1399811149: 'solana', 4663: 'robinhood', 143: 'monad' };
+  const VUE_CHAIN_NAMES = { sol: 'solana', solana: 'solana', bsc: 'bsc', bnb: 'bsc', eth: 'ethereum', ethereum: 'ethereum', base: 'base', robin: 'robinhood', robinhood: 'robinhood' };
+  const TOKEN_KEY_RE = /^(token(address|ca|mint)?|mint(address)?|ca|contract(address)?|basetoken(address)?)$/i;
+  const POOL_KEY_RE = /^(pair(address)?|pool(address)?|amm(address)?)$/i;
+  const vueHoverCache = new WeakMap();   // 行元素 → { text, hit, at }；recycle-scroller 复用 DOM 节点，文本一变即作废
+
+  /** 一个像"行数据"的对象 → { chain, ca, resolved }：有代币字段直接算已解析；只有池子字段就交给反解。 */
+  function vueItemToHit(item) {
+    if (!item || typeof item !== 'object') return null;
+    let ca = '';
+    let pool = '';
+    let chain = null;
+    let keys;
+    try { keys = Object.keys(item); } catch (_) { return null; }
+    for (const k of keys) {
+      let v;
+      try { v = item[k]; } catch (_) { continue; }
+      if (typeof v === 'string' && (ADDR_RE.test(v) || XXYY_POOL_ID_RE.test(v))) {
+        if (!ca && TOKEN_KEY_RE.test(k) && ADDR_RE.test(v)) ca = v;
+        else if (!pool && POOL_KEY_RE.test(k) && (ADDR_RE.test(v) || XXYY_POOL_ID_RE.test(v))) pool = v;
+      } else if ((typeof v === 'string' || typeof v === 'number') && /^(chain(id|name)?|network(id)?)$/i.test(k)) {
+        const s = String(v).toLowerCase();
+        chain = VUE_CHAIN_NAMES[s] || VUE_CHAIN_IDS[s] || chain;
+      }
+    }
+    if (ca) return { chain, ca, resolved: true };
+    if (pool) return { chain, ca: pool, resolved: false };
+    return null;
+  }
+
+  /** props 顶层 → item/row/data 这类对象一层 → 再一层；深度封 3、节点封 200；人味键整棵跳过。 */
+  function vueScanProps(props) {
+    const q = [[props, 0]];
+    let n = 0;
+    while (q.length && n++ < 200) {
+      const [obj, d] = q.shift();
+      if (!obj || typeof obj !== 'object') continue;
+      const hit = vueItemToHit(obj);
+      if (hit) return hit;
+      if (d >= 3) continue;
+      let keys;
+      try { keys = Object.keys(obj); } catch (_) { continue; }
+      for (const k of keys.slice(0, 40)) {
+        if (USERISH_RE.test(k)) continue;
+        let v;
+        try { v = obj[k]; } catch (_) { continue; }
+        if (v && typeof v === 'object' && !Array.isArray(v)) q.push([v, d + 1]);
+      }
+    }
+    return null;
+  }
+
+  function resolveByVue(target) {
+    if (!SITE.vueRoot) return null;
+    let rootEl = null;
+    try { rootEl = document.querySelector(SITE.vueRoot); } catch (_) { return null; }
+    const rootVn = rootEl && rootEl._vnode;
+    if (!rootVn) return null;
+    const rowEl = (SITE.rowSel && target.closest) ? target.closest(SITE.rowSel) : null;
+    if (rowEl) {
+      const c = vueHoverCache.get(rowEl);
+      if (c && c.text === rowEl.textContent && Date.now() - c.at < 5000) return c.hit;
+    }
+    // 悬停目标及其 ≤8 层祖先都算候选；取离目标最近的命中 vnode 所属的组件
+    const cands = new Map();
+    let n = target;
+    for (let i = 0; i < 8 && n && n !== document.body; i++, n = n.parentElement) cands.set(n, i);
+    let best = null;
+    let bestDist = 99;
+    let visited = 0;
+    const seen = new Set();
+    const trav = (vn, inst, depth) => {
+      if (!vn || typeof vn !== 'object' || visited > 60000 || depth > 150 || bestDist === 0) return;
+      if (seen.has(vn)) return;
+      seen.add(vn);
+      visited++;
+      const el = vn.el;
+      if (el && inst && cands.has(el)) {
+        const dist = cands.get(el);
+        if (dist < bestDist) { bestDist = dist; best = inst; }
+      }
+      if (vn.component) { trav(vn.component.subTree, vn.component, depth + 1); return; }
+      if (vn.suspense && vn.ssContent) trav(vn.ssContent, inst, depth + 1);
+      const ch = vn.children;
+      if (Array.isArray(ch)) for (const c of ch) { if (c && typeof c === 'object') trav(c, inst, depth + 1); }
+    };
+    try { trav(rootVn, null, 0); } catch (_) { return null; }
+    let hit = null;
+    let inst = best;
+    for (let up = 0; up < 3 && inst && !hit; up++, inst = inst.parent) {   // 行组件自己没有就看上两层（slot 数据可能在父组件）
+      try { hit = vueScanProps(inst.props); } catch (_) { hit = null; }
+    }
+    if (hit && !hit.chain && urlToken) hit.chain = urlToken.chain;   // 行数据没写链就沿用当前页的链（只影响副池 chips）
+    if (rowEl) vueHoverCache.set(rowEl, { text: rowEl.textContent, hit, at: Date.now() });
+    return hit;
+  }
+
+  /** xxyy 左栏几何命中：这一层只判断“是不是行”，不读页面 JS 对象。 */
+  function stableXxyyRow(target) {
+    if (!target || !target.closest) return null;
+    try {
+      // RecycleScroller 会复用外壳并重建内层 .row；dwell 若钉在内层，重建瞬间就被误判为离行。
+      return target.closest('.vue-recycle-scroller__item-view')
+        || target.closest('.virtual-wrap [role="item"], .monitor-item, .multi-wallet-monitor-item, .row');
+    } catch (_) { return null; }
+  }
+
+  function vueHoverRow(target, clientX) {
+    if (SITE.hover !== 'vue' || !target || !target.closest) return null;
+    if (!Number.isFinite(clientX)) return null;
+    // New-layout widgets can be dragged to the right; keep this exception scoped to token widgets.
+    if (clientX >= window.innerWidth * (SITE.hoverZone || LEFT_ZONE_RATIO)
+        && !target.closest('.follows, .monitor')) return null;
+    if (target.closest('footer, nav, [role="navigation"]')) return null;
+    return stableXxyyRow(target);
+  }
+
+  /**
+   * 真扩展的 xxyy dwell：600ms 后把当前坐标交给 background，由 MAIN world 只读 vnode。
+   * 同一行内跨格移动只更新坐标，不重启计时；离行会使旧异步回包过期。
+   */
+  function armXxyyVueHover(target, clientX, clientY) {
+    const nextRow = vueHoverRow(target, clientX);
+    if (!nextRow) return false;
+
+    if (hoverPendingRow === nextRow) {
+      hoverPendingTarget = target;
+      hoverPendingX = clientX;
+      hoverPendingY = clientY;
+      cancelHide();
+      return true;
+    }
+
+    cancelHoverDwell();
+    hoverPendingRow = nextRow;
+    hoverPendingTarget = target;
+    hoverPendingX = clientX;
+    hoverPendingY = clientY;
+    cancelHide();
+    const my = ++hoverProbeSeq;
+
+    const row = hoverPendingRow;
+    const probe = (attempt) => {
+      if (my !== hoverProbeSeq || !row || hoverPendingRow !== row) return;
+      const x = hoverPendingX;
+      const y = hoverPendingY;
+      requestXxyyVueHit(x, y, (resp) => {
+        if (my !== hoverProbeSeq || !row || hoverPendingRow !== row) return;
+        const raw = resp && resp.ok && resp.payload;
+        const ca = raw && typeof raw.ca === 'string' && (ADDR_RE.test(raw.ca)
+          || (raw.resolved !== true && isXxyyPoolRef(raw.ca))) ? raw.ca : '';
+        if (!ca) {
+          // Vue 虚拟行刚复用/重绘时，elementFromPoint 与 vnode 会有一个极短的不一致窗。
+          // 同一行、同一 hover generation 内最多补两次；离行立即由 hoverProbeSeq 作废。
+          if (attempt + 1 < XXYY_PROBE_MAX_ATTEMPTS) {
+            hoverTimer = setTimeout(() => { hoverTimer = null; probe(attempt + 1); }, XXYY_PROBE_RETRY_MS);
+            return;
+          }
+          cancelHoverDwell();
+          if (state.open && state.mode === 'preview' && !state.pinned) scheduleHide();
+          return;
+        }
+        const hit = { chain: raw.chain || (urlToken && urlToken.chain) || null, ca, resolved: raw.resolved === true };
+        hoverPendingCa = ca;
+        hoverPendingChain = hit.chain;
+        if (state.open && isCurrentToken(hit)) { cancelHide(); return; }
+        previewRow = row;
+        openToken(hit, 'preview');
+      });
+    };
+    hoverTimer = setTimeout(() => { hoverTimer = null; probe(0); }, HOVER_DEBOUNCE_MS);
+    return true;
+  }
+
+  // Stay attached to a bounded row, not the tracker/list container.
+  function gmgnHoverRow(target, x) {
+    if (SITE.hover !== 'gmgn-react' || !target || !target.closest
+        || !Number.isFinite(x) || x >= innerWidth * SITE.hoverZone
+        || target.closest('nav,footer,[role="navigation"]')) return null;
+    let best = null;
+    for (let el = target, up = 0; el && el !== document.body && up < 8; up++, el = el.parentElement) {
+      const r = el.getBoundingClientRect();
+      if (r.height > 180 || r.width > innerWidth * 0.6) break;
+      if (r.height >= 20 && r.width >= 80 && getComputedStyle(el).cursor === 'pointer') best = el;
+    }
+    return best;
+  }
+
+  function armGmgnHover(target, x, y) {
+    const row = gmgnHoverRow(target, x);
+    if (!row) return false;
+    if (hoverPendingRow === row) {
+      hoverPendingX = x; hoverPendingY = y; hoverPendingTarget = target;
+      cancelHide(); return true;
+    }
+    cancelHoverDwell(); cancelHide();
+    hoverPendingRow = row; hoverPendingX = x; hoverPendingY = y;
+    hoverPendingTarget = target;
+    const seq = ++hoverProbeSeq;
+    const probe = () => {
+      if (seq !== hoverProbeSeq || hoverPendingRow !== row || !row.isConnected) return;
+      const current = document.elementFromPoint(hoverPendingX, hoverPendingY);
+      if (!current || !row.contains(current)) { cancelHoverDwell(); return; }
+      sendMsg({type:'gmgn-react-hit',x:hoverPendingX,y:hoverPendingY}, resp => {
+        if (seq !== hoverProbeSeq || hoverPendingRow !== row || !row.isConnected) return;
+        const hit = resp && resp.ok && resp.payload;
+        if (hit && ADDR_RE.test(String(hit.ca || '')) && hit.chain) {
+          hoverPendingCa = hit.ca;
+          hoverPendingChain = hit.chain;
+          if (!state.open || !isCurrentToken(hit)) { previewRow = row; openToken(hit, 'preview'); }
+          // Virtual lists may reuse a row without moving the cursor.
+          hoverTimer = setTimeout(() => { hoverTimer = null; probe(); }, 400);
+        } else {
+          cancelHoverDwell();
+          if (state.open && state.mode === 'preview' && !state.pinned) scheduleHide();
+        }
+      });
+    };
+    hoverTimer = setTimeout(() => { hoverTimer = null; probe(); }, HOVER_DEBOUNCE_MS);
+    return true;
   }
 
   function onMouseOver(e) {
@@ -3596,6 +4735,18 @@ details.tweets > summary { color: #9aa0aa; }
     if (!settings.hoverPreview) return;
 
     const clientX = e.clientX;
+    if (SITE.hover === 'gmgn-react') {
+      let anchorHit = null;
+      try { anchorHit = resolveByAnchor(t); } catch (_) {}
+      if (!anchorHit && armGmgnHover(t, clientX, e.clientY)) return;
+    }
+    // xxyy 无链接列表行：真扩展必须走异步 MAIN-world 探针。
+    // 若命中的本来就是一条代币链接，仍留给下面的同步快路。
+    if (SITE.hover === 'vue' && !TEST) {
+      let anchorHit = null;
+      try { anchorHit = resolveByAnchor(t); } catch (_) { anchorHit = null; }
+      if (!anchorHit && armXxyyVueHover(t, clientX, e.clientY)) return;
+    }
     let hit = null;
     try { hit = resolveHovered(t, clientX); } catch (_) { hit = null; }
     const nextCa = hit && hit.ca ? hit.ca : null;
@@ -3606,7 +4757,8 @@ details.tweets > summary { color: #9aa0aa; }
     // mouseover；旧代码每次都 clearTimeout 重置，600ms 永远走不完，预览从来不弹。
     // 现在行内微动只更新"到点时用哪个 target 解析"，dwell 计时照常朝 600ms 累积。
     if (hoverTimer && nextCa && hoverPendingRow
-        && nextRow === hoverPendingRow && sameCa(nextCa, hoverPendingCa)) {
+        && nextRow === hoverPendingRow
+        && sameToken(hit, {ca:hoverPendingCa, chain:hoverPendingChain})) {
       hoverPendingTarget = t;
       hoverPendingX = clientX;
       return;
@@ -3616,10 +4768,17 @@ details.tweets > summary { color: #9aa0aa; }
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     hoverPendingRow = nextRow;
     hoverPendingCa = nextCa;
+    hoverPendingChain = hit && hit.chain;
     hoverPendingTarget = t;
     hoverPendingX = clientX;
 
-    if (!nextCa) return;   // 不在任何可识别的行上：不起新计时（退场交给 mouseout）
+    if (!nextCa) {
+      // 从预览行移到 Friends Only / 筛选按钮时，mouseout 可能已挂了退场计时。
+      // 光标进入明确可交互控件就先续住，不必赌用户会在 400ms 内点下去。
+      if (state.open && state.mode === 'preview' && !state.pinned && isPageControl(t)) cancelHide();
+      return;   // 不在任何可识别的行上：不起新计时（退场交给 mouseout）
+    }
+    cancelHide();
 
     hoverTimer = setTimeout(() => {
       hoverTimer = null;
@@ -3632,41 +4791,65 @@ details.tweets > summary { color: #9aa0aa; }
         if (state.open && state.mode === 'preview' && !state.pinned) scheduleHide();
         return;
       }
-      if (state.open && sameCa(hit2.ca, state.ca)) { cancelHide(); return; }
+      if (state.open && isCurrentToken(hit2)) { cancelHide(); return; }
       previewRow = hoverRowOf(target);
-      load(hit2.ca, hit2.chain, 'preview', false);
+      openToken(hit2, 'preview');   // v0.9.12：预览也走站点反解（xxyy 左栏链接挂的可能也是池子地址）
     }, HOVER_DEBOUNCE_MS);
   }
 
   function onMouseOut(e) {
-    if (!state.open || state.mode !== 'preview' || state.pinned) return;
     const to = e.relatedTarget;
+    const from = e.target;
+    // dwell 期间离开行就作废；行内从名字移到价格不算离开。
+    if (hoverPendingRow && (!to || !hoverPendingRow.contains || !hoverPendingRow.contains(to))) {
+      cancelHoverDwell();
+    }
+    if (!state.open || state.mode !== 'preview' || state.pinned) return;
     if (to && host && (to === host || host.contains(to))) return;
     if (to && previewRow && previewRow.contains && previewRow.contains(to)) return;
+    // Friends Only 这类控件点击后常被 Vue 原地重建，浏览器会补一颗 relatedTarget=null 的 mouseout。
+    // 这不是“用户离开预览”，不要让旧退场计时把刚操作完的卡片关掉；点图表空白仍由 click 明确关闭。
+    const fromControlOutsidePreview = from && isPageControl(from)
+      && !(previewRow && previewRow.contains && previewRow.contains(from));
+    if (fromControlOutsidePreview || (to && isPageControl(to))) { cancelHide(); return; }
     scheduleHide();
   }
 
   // ---------- 点卡片外关闭 ----------
   /**
    * 卡片是浮在图表上的，主人想看图时不该被逼着去点 ×。
-   * 不关的三种点击：卡片自身（含圆钮，都在 shadow 宿主里）、左栏那些可悬停的代币行、
-   * 任何 /tokens/ 链接（那是在切币，不是想关卡）。
+   * 不关的四种点击：卡片自身（含圆钮，都在 shadow 宿主里）、左栏那些可悬停的代币行、
+   * 任何代币链接（那是在切币，不是想关卡）、页面筛选/排序控件。
    */
   function onDocClick(e) {
-    if (!state.open) return;
+    if (!state.open) { cancelHoverDwell(); resolveSeq.url++; resolveSeq.preview++; return; }
     const t = e.target;
     if (!t || t.nodeType !== 1) return;
     // closed shadow 里的点击会被重定向到宿主元素上，这一条就能兜住卡片与圆钮
     if (host && (t === host || host.contains(t))) return;
     try {
       // 点的是代币链接 → 立刻换币（而不是关卡，也不必等轮询）
-      if (fastSwitchFromClick(t)) return;
-      if (previewRow && previewRow.contains && previewRow.contains(t)) return;
-      if (resolveHovered(t, e.clientX)) return; // 左栏可解析成代币的行
+      if (fastSwitchFromClick(t, e)) { cancelHoverDwell(); cancelHide(); return; }
+      if (previewRow && previewRow.contains && previewRow.contains(t)) {
+        cancelHoverDwell();
+        cancelHide();
+        return;
+      }
+      if (gmgnHoverRow(t, e.clientX) || vueHoverRow(t, e.clientX) || resolveHovered(t, e.clientX)) { // 左栏可解析/几何命中的代币行
+        // v0.9.13：点击行会由站点自己的路由切到 URL 模式；撤掉移动鼠标时新挂的 dwell，
+        // 否则它可能在路由完成后又把旧预览盖回来。
+        cancelHoverDwell();
+        cancelHide();
+        return;
+      }
       // v0.9.1：点的是页面上的控件（Friends only 勾选框、筛选/排序按钮、外链…）= 用户在操作
       // fomo，不是在"点卡外关卡"。主人实测：点 Holders 表上方的 Friends only 卡片直接消失。
       // 只有点空白/图表这类非交互区才算主动关卡。
       if (isPageControl(t)) {
+        // v0.9.13：悬停预览从左栏移向 Friends Only 时，mouseout 已经挂了 400ms 退场计时；
+        // 单靠“不把 click 当卡外”还不够，旧计时仍会在 click 之后把卡关掉。页面控件点击
+        // 是明确交互，先撤掉这颗计时器；之后真点空白/图表仍会照常关闭。
+        cancelHide();
         // K3 #3：用户很可能刚点了 fomo 的 Holders 标签 / Friends only 开关来"修"空态——观察者可能早撤了，
         // 400ms 后补扫一次，别让"切到 Holders"这句在表已经出来后还挂着。
         scheduleControlRescan();
@@ -3706,7 +4889,7 @@ details.tweets > summary { color: #9aa0aa; }
 
   // ---------- 键盘 ----------
   function onKeyDown(e) {
-    if (e.key !== 'Escape' || !state.open) return;
+    if (e.key !== 'Escape') return;
     const a = document.activeElement;
     if (a) {
       const tag = (a.tagName || '').toUpperCase();
@@ -3718,19 +4901,34 @@ details.tweets > summary { color: #9aa0aa; }
   // ---------- 启动 ----------
   function start() {
     loadSettings(() => {
+      if (disposed) return;
       urlToken = parsePath(location.pathname);
-      if (urlToken && autoOpenEnabled()) load(urlToken.ca, urlToken.chain, 'url', false);
+      if (urlToken && autoOpenEnabled()) openFromUrl(urlToken);
       else ensureUi();
     });
     watchSettings();
     installUrlWatcher();
-    document.addEventListener('mouseover', onMouseOver, true);
-    document.addEventListener('mouseout', onMouseOut, true);
-    document.addEventListener('keydown', onKeyDown, true);
-    document.addEventListener('click', onDocClick, true);
-    document.addEventListener('scroll', onScrollMaybeRescan, { capture: true, passive: true });
-    window.addEventListener('resize', applySize);
+    listen(document, 'mouseover', onMouseOver, true);
+    listen(document, 'mouseout', onMouseOut, true);
+    listen(document, 'keydown', onKeyDown, true);
+    listen(document, 'click', onDocClick, true);
+    listen(document, 'scroll', onScrollMaybeRescan, { capture: true, passive: true });
+    listen(window, 'resize', () => { applySize(); applyLauncherPos(); });
     ensureUi();
+  }
+
+  // 只在真实 fomo content script 上受理后台快照；测试主世界桩与其它站点均不开这条入口。
+  if (!TEST) {
+    try {
+      listenChrome(chrome.runtime.onMessage, (msg, sender, sendResponse) => {
+        if (disposed || !sender || sender.id !== chrome.runtime.id || !msg) return false;
+        if (msg.type === 'lens-health') { sendResponse({ ok: true }); return false; }
+        if (SITE.id !== 'fomo' || msg.type !== 'fomo-mirror-snapshot') return false;
+        try { sendResponse({ ok: true, payload: buildFomoMirrorSnapshot(msg) }); }
+        catch (_) { sendResponse({ ok: false, kind: 'unavailable' }); }
+        return false;
+      });
+    } catch (_) { /* 扩展上下文失效时由后台超时并给固定提示 */ }
   }
 
   if (TEST) {
@@ -3739,9 +4937,12 @@ details.tweets > summary { color: #9aa0aa; }
       get host() { return host; },
       diag() { return buildDiag(); },
       stopScrapers() { stopScrapers(); },   // 模拟 25s 观察者过期
+      mirrorSnapshot(msg) { return buildFomoMirrorSnapshot(msg); },
+      mirrorHolderCount() { return fomoMirrorHolderCount(); },
+      mirrorShare(value) { return snapshotFomoShare(value); },
       get state() {
         return {
-          open: state.open, ca: state.ca, mode: state.mode,
+          open: state.open, ca: state.ca, chain: state.chain, mode: state.mode,
           pinned: state.pinned, status: state.status, lang: settings.lang,
           openMode: settings.openMode, compact: state.compact,
           tab: state.tab,
@@ -3759,5 +4960,10 @@ details.tweets > summary { color: #9aa0aa; }
     };
   }
 
+  listen(document, DISPOSE_EVENT, dispose);
+  globalThis[INSTANCE_KEY] = { dispose, alive: () => {
+    if (disposed) return false;
+    try { return TEST || !!chrome.runtime.id; } catch (_) { return false; }
+  } };
   start();
 })();

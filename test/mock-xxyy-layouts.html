@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>XXYY layout regression</title><style>body{margin:0;background:#151820;color:#fff;font:14px Arial}.follows{position:absolute;left:15px;top:100px;width:290px}.monitor{position:absolute;left:15px;top:270px;width:290px}.monitor.right{left:935px;top:100px;width:300px}.row,.monitor-item,.multi-wallet-monitor-item{height:52px;box-sizing:border-box;padding:10px;border:1px solid #666;cursor:pointer}.name{display:inline-block;width:145px}.extra{float:right}main{position:absolute;left:340px;top:100px}button{margin:8px}</style><div id="app"></div>
+<script type="module">
+import {a9 as Vue} from '/fixtures/xxyy-live-vue/element-B6jdPyMr.js';
+import {V as VirtualList} from '/fixtures/xxyy-live-vue/virtual-list.min-DdhwEh7S.js';
+const {createApp,h,reactive}=Vue;
+const ca=n=>'0x'+String(n).repeat(40),wallet=ca(9);
+const model=reactive({rows:[{id:'f1',tokenAddress:ca(1),symbol:'Favorite ONE'},{id:'f2',tokenAddress:ca(2),symbol:'Favorite TWO'}]});
+const Follow={name:'followToken',props:['tokenData','defaultChainId'],computed:{chainId(){return 'robin'},curChain(){return this.defaultChainId}},render(){return h('div',{class:'row',id:this.tokenData.id},[h('span',{class:'name'},this.tokenData.symbol),h('span',{class:'extra'},'$20K')])}};
+const Monitor={name:'monitorListItem',props:['monitorData','mode'],render(){const d=this.monitorData;return h('div',{class:this.mode||'monitor-list-item row',id:d.id},[h('span',{class:'name'},d.tokenInfo?.symbol||'Native transfer'),h('span',{class:'extra'},'$300')])}};
+const data=[{id:'trade',eventType:0,tokenInfo:{address:ca(3),symbol:'Trade BSC'},tradeData:{chain:'bsc',user:wallet}},{id:'transfer',eventType:1,tokenInfo:{address:ca(4),symbol:'Transfer BASE'},transferData:{chain:'base',from:wallet}},{id:'native',eventType:1,tokenInfo:{symbol:'ETH'},transferData:{chain:'eth',from:wallet,to:ca(8)}},{id:'walletOnly',eventType:0,tokenInfo:{symbol:'No token'},tradeData:{chain:'robin',user:wallet}}];
+createApp({data:()=>({chainId:'robin'}),render(){return h('div',[
+ h('div',{class:'follows'},[h(VirtualList,{class:'virtual-wrap',dataKey:'id',modelValue:model.rows,size:52,keeps:4},{item:({record})=>h(Follow,{tokenData:record,defaultChainId:'base'})})]),
+ h('div',{class:'monitor'},data.map(d=>h(Monitor,{monitorData:d,mode:d.id==='transfer'?'monitor-item':'monitor-list-item row'}))),
+ h('div',{class:'monitor right'},[h(Monitor,{monitorData:{id:'multi',chain:'eth',tokenAddress:ca(5),tokenInfo:{symbol:'Multi ETH'}},mode:'multi-wallet-monitor-item'})]),
+ h('main','Market cap — old sidebar and new floating widgets, favorites, card/list monitor and multiple chains')])}}).mount('#app');
+window.reuseFavorite=()=>{model.rows[0]={id:'f1',tokenAddress:ca(6),symbol:'Favorite SIX'}};
+window.staleHoistedFavorite=()=>{
+ const seen=new Set();function walk(v){if(!v||typeof v!=='object'||seen.has(v))return;seen.add(v);if(v.component){const c=v.component;if(c.type?.name==='followToken'&&c.props.tokenData.id==='f1'){c.subTree.el=document.createElement('div');c.subTree.children[0].el=null;return}walk(c.subTree);return}if(Array.isArray(v.children))v.children.forEach(walk)}walk(document.querySelector('#app')._vnode);
+};
+document.body.dataset.vueReady=Vue.version;
+</script></html>

@@ -1,0 +1,115 @@
+<!doctype html>
+<!-- gmgn 代币页的最小 mock（步骤 37，v0.9.11 自用·独立分支）。
+     形状按 2026-09-05 台湾出口 headless 实拍：顶部导航（Trenches/Trending/…/Track），
+     左栏「Wallet Tracker」面板（页签 Wallet / Track / Callout / Monitor），主区 K 线 + 交易表，
+     代币页 URL = /sol/token/<CA>?activityTag=kol，同代币的 ?tab=dev_token 只是页签参数。
+     ?lang=zh 切成中文界面（追踪/钱包/喊单/监控）——扩展整条链路只认 URL 与链接 href，两种界面必须同一结果。
+     左栏「追踪」行给三种形态：链接行 ×2（能悬停预览 + 点击秒切）、非链接行（自己 pushState，靠轮询/补丁跟上）。
+     诱饵：solscan 外链（href 也含 /token/，不许被当成代币）；同代币 ?tab=dev_token 链接（不许重开卡）。 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pump ↑ $3.88K | GMGN.AI | The Fastest Multi-Chain Meme Trading Terminal</title>
+  <style>
+    body { margin: 0; font: 13px/1.5 system-ui; background: #0b0e11; color: #cfd6dd; }
+    nav.top { height: 56px; padding: 0 14px; display: flex; gap: 16px; align-items: center; border-bottom: 1px solid #22262b; }
+    nav.top a { color: #cfd6dd; text-decoration: none; }
+    #layout { display: flex; }
+    #wallet-tracker { width: 400px; min-height: 700px; border-right: 1px solid #22262b; padding: 10px; box-sizing: border-box; }
+    #wallet-tracker .tabs span { margin-right: 12px; color: #8a929c; }
+    #wallet-tracker .tabs span.on { color: #fff; font-weight: 600; }
+    .trow { display: flex; gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid #1a1e23; cursor: pointer; }
+    .trow a { color: #cfd6dd; text-decoration: none; display: flex; gap: 8px; align-items: center; }
+    .trow .sym { font-weight: 600; }
+    .trow .who { color: #8a929c; font-size: 12px; }
+    .trow .act { color: #40c48c; font-size: 12px; }
+    main { flex: 1; padding: 12px; }
+    #chart { height: 320px; background: #14181d; border: 1px solid #22262b; display: flex; align-items: center; justify-content: center; color: #4a525a; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    td, th { padding: 6px 8px; text-align: left; border-bottom: 1px solid #1a1e23; font-size: 12px; }
+    footer.bar { position: fixed; bottom: 0; left: 0; right: 0; height: 32px; border-top: 1px solid #22262b; padding: 6px 14px; color: #8a929c; }
+  </style>
+</head>
+<body>
+  <nav class="top">
+    <b>GMGN</b>
+    <a href="/?chain=sol" data-t="Trenches">Trenches</a>
+    <a href="/trend?chain=sol" data-t="Trending">Trending</a>
+    <a href="/copytrade?chain=sol" data-t="CopyTrade">CopyTrade</a>
+    <a href="/monitor?chain=sol" data-t="Monitor">Monitor</a>
+    <a href="/follow?chain=sol" data-t="Track">Track</a>
+    <a href="/portfolio?chain=sol" data-t="Portfolio">Portfolio</a>
+  </nav>
+  <div id="layout">
+    <div id="wallet-tracker">
+      <div class="tabs">
+        <span data-t="Wallet">Wallet</span><span class="on" data-t="Track">Track</span><span data-t="Callout">Callout</span><span data-t="Monitor">Monitor</span>
+      </div>
+      <div id="track-list">
+        <!-- 链接行：真站若把行渲染成 <a href="/sol/token/…">，就是这个形状 -->
+        <div class="trow" id="track-row-cashcat">
+          <a href="/sol/token/0x020bfc650a365f8bb26819deaabf3e21291018b4?activityTag=kol">
+            <img alt="" width="20" height="20" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==">
+            <span class="sym">CASHCAT</span><span class="who">HftN…UbpT</span><span class="act" data-t="Buy">Buy $1.5K</span>
+          </a>
+        </div>
+        <div class="trow" id="track-row-pons">
+          <a href="/sol/token/0x39dbed3a2bd333467115de45665cc57f813c4571?activityTag=kol">
+            <img alt="" width="20" height="20" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==">
+            <span class="sym">PONS</span><span class="who">9M2r…pVoi</span><span class="act" data-t="Buy">Buy $4.2K</span>
+          </a>
+        </div>
+        <!-- 非链接行：真站若是 div + onClick 走 SPA 路由，就是这个形状（自己 pushState） -->
+        <div class="trow" id="track-row-nolink" data-ca="0x020bfc650a365f8bb26819deaabf3e21291018b4">
+          <img alt="" width="20" height="20" src="data:image/gif;base64,R0lGODlhAQABAIAAAHiChP///yH5BAEAAAEALAAAAAABAAEAAAICTAEAOw==">
+          <span class="sym">CASHCAT</span><span class="who">Velvet100x</span><span class="act" data-t="Sell">Sell $0.8K</span>
+        </div>
+      </div>
+      <p class="who" data-t="hint">Tracked wallets' latest trades. Click a row to open the token.</p>
+    </div>
+    <main>
+      <div id="token-head">
+        <b>Pump</b> <span>Pump</span> <span>53m</span> <span>GygN…hcer</span>
+        <a id="solscan-link" href="https://solscan.io/token/0x39dbed3a2bd333467115de45665cc57f813c4571#metadata" data-t="solscan">solscan</a>
+        <a id="dev-tab-link" href="/sol/token/0x39dbed3a2bd333467115de45665cc57f813c4571?tab=dev_token">1396/159274</a>
+        <span>$3.88K</span> <span data-t="Price">Price</span> <span>$0.0₅412</span> <span data-t="Liq">Liq</span> <span>$1.44K</span>
+      </div>
+      <div id="chart">K 线区（占位）</div>
+      <table>
+        <thead><tr><th data-t="Age">Age</th><th data-t="Type">Type</th><th>MC</th><th data-t="Amount">Amount</th><th>Total USD</th><th>Gas</th><th data-t="Trader">Trader</th></tr></thead>
+        <tbody>
+          <tr><td>5s</td><td data-t="Buy">Buy</td><td>$3.88K</td><td>386.1K</td><td>$1.591</td><td>$0.023</td><td>HftN…UbpT</td></tr>
+          <tr><td>12s</td><td data-t="Sell">Sell</td><td>$3.83K</td><td>1M</td><td>$4.262</td><td>&lt;$0.001</td><td>HftN…UbpT</td></tr>
+          <tr><td>2m</td><td data-t="Buy">Buy</td><td>$3.88K</td><td>95.84K</td><td>$0.395</td><td>$0.003</td><td>HftN…UbpT</td></tr>
+          <tr><td>3m</td><td data-t="Buy">Buy</td><td>$3.88K</td><td>180.8K</td><td>$0.746</td><td>&lt;$0.001</td><td>HftN…UbpT</td></tr>
+          <tr><td>3m</td><td data-t="Sell">Sell</td><td>$3.84K</td><td>503.2K</td><td>$2.051</td><td>$0.035</td><td>9M2r…pVoi</td></tr>
+          <tr><td>3m</td><td data-t="Buy">Buy</td><td>$3.88K</td><td>1.8M</td><td>$7.56</td><td>$0.037</td><td>HftN…UbpT</td></tr>
+          <tr><td>4m</td><td data-t="Buy">Buy</td><td>$3.87K</td><td>456.6K</td><td>$1.876</td><td>$0.036</td><td>9M2r…pVoi</td></tr>
+          <tr><td>5m</td><td data-t="Burn">Burn</td><td>Burn</td><td>59.7K</td><td>Burnt 59.7K Pump</td><td>$0.019</td><td>Velvet100x</td></tr>
+        </tbody>
+      </table>
+      <p>GMGN.AI is a MEME token trading platform supporting Solana, BSC, Base, and Ethereum — covering new token monitoring, security auditing, holder analysis, smart money copy trading, wallet P&amp;L analytics, and automated trade execution, widely used for early-stage on-chain project discovery and quantitative trading. Real-Time New Token Monitoring continuously scans launchpads including Pump.fun, FourMeme, Raydium, and letsbonk with filters for market cap, volume, and creation time.</p>
+    </main>
+  </div>
+  <footer class="bar"><span data-t="Trenches">Trenches</span> · <span data-t="WalletTracker">Wallet Tracker</span> · <span data-t="Holding">Holding</span> · <span data-t="Watchlist">Watchlist</span></footer>
+  <script>
+    // ?lang=zh → 中文界面（词表按 gmgn 中文界面常用译法；只换文案，结构/href 一个字不动）
+    (function () {
+      var zh = { Trenches: '新币', Trending: '热门', CopyTrade: '跟单', Monitor: '监控', Track: '追踪', Portfolio: '资产',
+        Wallet: '钱包', Callout: '喊单', Buy: '买入', Sell: '卖出', Burn: '销毁', Price: '价格', Liq: '池子', Age: '时间', Type: '类型',
+        Amount: '数量', Trader: '交易者', WalletTracker: '钱包追踪', Holding: '持仓', Watchlist: '关注列表', solscan: 'solscan',
+        hint: '追踪钱包的最新交易。点一行打开该代币。' };
+      if (/[?&]lang=zh/.test(location.search)) {
+        document.documentElement.lang = 'zh';
+        document.querySelectorAll('[data-t]').forEach(function (el) {
+          var k = el.getAttribute('data-t');
+          if (zh[k]) el.textContent = el.textContent.replace(/^[A-Za-z ]+/, zh[k]);
+        });
+      }
+      // 非链接行：像真站的 SPA 路由一样自己 pushState（不是链接，扩展只能靠 URL 变化跟上）
+      var r = document.getElementById('track-row-nolink');
+      r.addEventListener('click', function () { history.pushState({}, '', '/sol/token/' + r.getAttribute('data-ca') + '?activityTag=kol'); });
+    })();
+  </script>
+</body>
+</html>

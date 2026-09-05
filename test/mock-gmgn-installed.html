@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>GMGN extension acceptance fixture</title>
+<style>
+body{margin:0;background:#0b0e11;color:#d4d8df;font:14px system-ui} nav{height:50px;padding:12px;box-sizing:border-box} #tracker{width:400px;padding:12px;box-sizing:border-box} .row{display:flex;gap:14px;align-items:center;height:52px;cursor:pointer;border-bottom:1px solid #30343b} .row a{color:inherit} .price{margin-left:auto} main{position:absolute;left:430px;top:60px;width:760px;height:600px;background:#151920} button{margin:12px;padding:12px} #chart{height:450px} #spacer{height:80px}
+</style></head><body>
+<nav>GMGN · Wallet Tracker · 追踪</nav><div id="tracker" data-sentry-component="WalletTrack">
+<div class="row" id="anchor"><a href="/eth/token/0x020bfc650a365f8bb26819deaabf3e21291018b4"><span class="sym">CASHCAT</span></a><span class="price">$2.1K</span></div>
+<div class="row" id="react" data-index="2"><span class="sym">SOL TOKEN</span><span class="price">$4.2K</span></div>
+<div class="row" id="wallet" data-index="3"><span class="sym">Wallet row</span><span class="price">$9K</span></div>
+<div class="row" id="external"><a href="https://example.org/eth/token/0x1111111111111111111111111111111111111111">External lookalike</a></div>
+<div class="row" id="newtab"><a target="_blank" href="/eth/token/0x1111111111111111111111111111111111111111">Open another tab</a></div>
+<div id="spacer"></div><button id="filter" aria-pressed="false">Friends Only</button>
+</div><main><h2>GMGN chart and trades</h2><div id="chart">Chart background</div></main>
+<script>
+const SOL_A='GygNPCFvqrMuPBM5R1siGKfrwqeJ8r5PYccx5EnNhcer';
+const SOL_B='So11111111111111111111111111111111111111112';
+function setToken(ca=SOL_A, chain='sol'){
+ const row=document.querySelector('#react');
+ // Like React DOM: current host props and committed fiber are page-world properties.
+ const props={item:{token:{address:ca,symbol:'SOL TOKEN'},chain},wallet:{address:SOL_B}};
+ Object.defineProperty(row,'__reactProps$installed',{value:props,configurable:true,enumerable:true,writable:true});
+ Object.defineProperty(row,'__reactFiber$installed',{value:{memoizedProps:props,return:null,stateNode:row},configurable:true,enumerable:true,writable:true});
+ row.dataset.current=ca;
+}
+setToken();
+document.querySelector('#wallet').__reactProps$installed={wallet:{address:SOL_B},owner:{address:SOL_A}};
+document.querySelector('#react').onclick=()=>history.pushState({},'', '/sol/token/'+document.querySelector('#react').dataset.current);
+document.querySelector('#filter').onclick=e=>{e.currentTarget.setAttribute('aria-pressed',String(e.currentTarget.getAttribute('aria-pressed')!=='true'))};
+document.querySelectorAll('a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();if(!e.ctrlKey&&!e.metaKey&&a.id!=='external'&&!a.target&&new URL(a.href).origin===location.origin)history.pushState({},'',a.getAttribute('href'))}));
+if(new URLSearchParams(location.search).has('empty-tracker')){
+ const tracker=document.querySelector('#tracker');
+ tracker.replaceChildren(Object.assign(document.createElement('div'),{textContent:'你还没有登录GMGN'}));
+ tracker.style.width='464px';tracker.style.height='346px';
+ if(new URLSearchParams(location.search).has('late-tracker')){
+  tracker.remove();setTimeout(()=>document.body.insertBefore(tracker,document.querySelector('main')),2600);
+ }
+}
+</script></body></html>

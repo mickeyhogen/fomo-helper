@@ -1,0 +1,129 @@
+<!doctype html>
+<!-- xxyy 终端的 mock（步骤 35）。v0.9.9：只有侧栏壳子 + 一个代币链接，验证 /sol/<ca> 认币、只长 Meta 页签、抓取器一个不起。
+     v0.9.12：按 2026-09-05 台湾出口实拍补左栏「收藏 / 趋势 / 新币」列表——真站是 Vue 3 生产版，行是
+     <div class="row">（不是链接，元素上也不挂组件实例），行数据只在 #app._vnode 走下去的组件 props.item 里
+     （tokenAddress = 代币 CA、pairAddress = 池子；链选择在上层列表组件 ctx.chainId）。这里用同形状的假 vnode 树挂在 #app._vnode 上，
+     行点击像真站一样 pushState 到 /sol/<池子地址>。 -->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>XXYY - Fast Trading as Lightning</title>
+  <style>
+    body { margin: 0; font: 13px/1.5 system-ui; background: #0b0e11; color: #cfd6dd; }
+    nav { padding: 10px 14px; border-bottom: 1px solid #22262b; }
+    nav span { margin-right: 14px; }
+    #layout { display: flex; }
+    #xx-side { width: 480px; min-height: 600px; border-right: 1px solid #22262b; padding: 10px; box-sizing: border-box; }
+    #xx-side .tabs span { margin-right: 14px; color: #8a929c; }
+    #xx-side .tabs span.on { color: #fff; font-weight: 600; border-bottom: 2px solid #fff; }
+    .vue-recycle-scroller { margin-top: 10px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 10px 6px; border-bottom: 1px solid #1a1e23; cursor: pointer; }
+    .row .cell-token { display: flex; gap: 10px; align-items: center; }
+    .row .sym { font-weight: 700; }
+    .row .mc { color: #8a929c; font-size: 12px; }
+    .row .price { text-align: right; }
+    .row .chg { color: #40c48c; font-size: 12px; }
+    main { flex: 1; padding: 16px; }
+    #chart { height: 260px; background: #14181d; border: 1px solid #22262b;
+             display: flex; align-items: center; justify-content: center; color: #4a525a; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <nav>
+      <span>钱包监控</span><span>推特监控</span><span>趋势</span><span>扫链</span>
+      <span>活跃持仓</span><span>收藏</span><span>🚀KOL买入</span><span>🔥Tagholder买入</span>
+    </nav>
+    <div id="layout">
+      <div id="xx-side">
+        <div class="tabs"><span class="on">收藏</span><span>趋势</span><span>新币</span></div>
+        <div class="vue-recycle-scroller ready direction-vertical">
+          <div class="vue-recycle-scroller__item-view">
+            <div class="row" id="xx-row-cashcat">
+              <div class="cell cell-token"><div class="logo">🐱</div><div><div class="sym">CASHCAT</div><div class="mc">2M</div></div></div>
+              <div class="price"><div>$0.00204</div><div class="chg">+710%</div></div>
+            </div>
+          </div>
+          <div class="vue-recycle-scroller__item-view">
+            <div class="row" id="xx-row-pons">
+              <div class="cell cell-token"><div class="logo">🍄</div><div><div class="sym">PONS</div><div class="mc">19.8M</div></div></div>
+              <div class="price"><div>$0.01988</div><div class="chg">+360%</div></div>
+            </div>
+          </div>
+          <div class="vue-recycle-scroller__item-view">
+            <div class="row" id="xx-row-auth">
+              <div class="cell cell-token"><div class="logo">🔐</div><div><div class="sym">LOGINTEST</div><div class="mc">1M</div></div></div>
+              <div class="price"><div>$0.001</div><div class="chg">+10%</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <main>
+        <div id="chart">K 线区（占位）</div>
+        <!-- 放在浮卡之外，确保真鼠标事件落到控件上，而不是被卡片遮住 -->
+        <label id="xx-friends" style="position:fixed;right:24px;bottom:24px;z-index:1;cursor:pointer"><input type="checkbox" id="xx-friends-toggle"> Friends Only</label>
+        <p>今日热门：<a id="hot-link" href="/sol/So1111111111111111111111111111111111111111">$DEMO</a></p>
+        <p>Support · 帮助文档 · XXYY API · Terms of Use · Privacy Policy</p>
+      </main>
+    </div>
+  </div>
+  <script>
+    // 假 vnode 树：形状 = 真站实测（App → … → RecycleScroller → DynamicScrollerItem{props.item} → subTree.el = 行）
+    (function () {
+      var CASHCAT = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
+      var PONS = '0x39dbed3a2bd333467115de45665cc57f813c4571';
+      var AUTH = '0x1111111111111111111111111111111111111111';
+      var POOL_CASHCAT = 'J7ycRwPnQvGzMnb4hLyFq2sXtKdE9bVcU3aHm5RpT8Wk';   // 行点击后 URL 上挂的池子地址
+      var POOL_PONS = 'K9zTqLmB2vXrHn6cWpF4dSyGa8eJu3NtR7bVk5MhQ1Zc';
+      var POOL_AUTH = 'L8hUrE2nZqWp7sYc3bKx6aVt9mJf4dNg1oRi5ePsQ7uA';
+      var rows = [
+        { el: document.getElementById('xx-row-cashcat'), item: { tokenAddress: CASHCAT, pairAddress: POOL_CASHCAT, symbol: 'CASHCAT', creator: { address: 'So1111111111111111111111111111111111111111' } } },
+        { el: document.getElementById('xx-row-pons'), item: { tokenAddress: PONS, pairAddress: POOL_PONS, symbol: 'PONS' } },
+        { el: document.getElementById('xx-row-auth'), item: { tokenAddress: AUTH, pairAddress: POOL_AUTH, symbol: 'LOGINTEST' } },
+      ];
+      var rowTemplates = rows.map(function (r) { return { item: Object.assign({}, r.item) }; });
+      var scroller = { type: { name: 'RecycleScroller' }, props: { items: rows.map(function (r) { return r.item; }) }, parent: null, subTree: null };
+      scroller.subTree = { el: document.querySelector('.vue-recycle-scroller'), children: rows.map(function (r) {
+        var inst = { type: { name: 'DynamicScrollerItem' }, props: { item: r.item, index: 0, active: true }, parent: scroller, subTree: null };
+        r.inst = inst;
+        inst.subTree = { el: r.el.parentElement, children: [{ el: r.el, children: Array.prototype.map.call(r.el.children, function (c) { return { el: c, children: [] }; }) }] };
+        return { component: inst };
+      }) };
+      var side = { type: { name: 'tokens' }, props: { list: rows.map(function (r) { return r.item; }) }, ctx: { get chainId() { return 'sol'; } }, parent: null, subTree: { el: document.getElementById('xx-side'), children: [{ component: scroller }] } };
+      scroller.parent = side;
+      var app = { type: { name: 'App' }, props: {}, parent: null, subTree: { el: document.getElementById('app'), children: [{ el: document.querySelector('nav'), children: [] }, { el: document.getElementById('layout'), children: [{ component: side }, { el: document.querySelector('main'), children: [] }] }] } };
+      side.parent = app;
+      document.getElementById('app')._vnode = { component: app };
+      // 行点击 = 真站 SPA 路由：pushState 到 /sol/<池子地址>（不是代币 CA）
+      function bindRow(r) {
+        r.el.addEventListener('click', function () { history.pushState({}, '', '/sol/' + r.item.pairAddress); });
+      }
+      rows.forEach(bindRow);
+
+      // 黑盒回归钩子：模拟 RecycleScroller 复用同一 item-view、销毁并重建内层 .row。
+      // 扩展若把 dwell 钉在内层 row，重建就会随机丢预览；钉在外壳才会保持同一行语义。
+      window.__xxyyReuseFirstRow = function (which) {
+        var source = which === 'auth' ? rowTemplates[2] : (which === 'pons' ? rowTemplates[1] : rowTemplates[0]);
+        var target = rows[0];
+        var fresh = target.el.cloneNode(true);
+        fresh.querySelector('.sym').textContent = source.item.symbol;
+        fresh.querySelector('.mc').textContent = which === 'pons' ? '19.8M' : '2M';
+        target.el.replaceWith(fresh);
+        target.el = fresh;
+        target.item = Object.assign({}, source.item);
+        target.inst.props.item = target.item;
+        target.inst.subTree = { el: fresh.parentElement, children: [{ el: fresh, children: Array.prototype.map.call(fresh.children, function (c) { return { el: c, children: [] }; }) }] };
+        bindRow(target);
+        return fresh.querySelector('.sym');
+      };
+      // K3 URL/hover 并发回归：模拟某一行只给 pairAddress、没有 tokenAddress，迫使 preview 也走反解。
+      window.__xxyyMakeFirstRowPoolOnly = function () {
+        var target = rows[0];
+        target.item = { pairAddress: POOL_CASHCAT, symbol: 'CASHCAT' };
+        target.inst.props.item = target.item;
+        return target.el;
+      };
+    })();
+  </script>
+</body>
+</html>

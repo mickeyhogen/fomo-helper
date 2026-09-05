@@ -1,17 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Fomo放大镜",
-  "version": "0.9.8",
-  "description": "在 fomo.family 浏览代币时，把 DeBot 叙事、社区 Thesis、持有人结构与来源推文聚成一张标签页浮动卡片。零后端，不采集任何数据。By @0xHogen",
+  "name": "Fomo Lens",
+  "version": "0.9.21",
+  "description": "在 Fomo、GMGN 和 XXYY 查看代币叙事、Fomo 观点与持仓。支持 XXYY 新旧界面；读取 Fomo 数据需在同一浏览器登录。By @0xHogen",
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://app.debot.ai/*",
     "https://debot.ai/*",
     "https://api.fxtwitter.com/*",
     "https://api.dexscreener.com/*",
-    "https://api.github.com/*"
+    "https://api.github.com/*",
+    "https://gmgn.ai/*",
+    "https://fomo.family/*",
+    "https://pro.xxyy.io/*",
+    "https://www.xxyy.io/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -19,7 +24,10 @@
   "content_scripts": [
     {
       "matches": [
-        "https://fomo.family/*"
+        "https://fomo.family/*",
+        "https://gmgn.ai/*",
+        "https://pro.xxyy.io/*",
+        "https://www.xxyy.io/*"
       ],
       "js": [
         "content.js"
@@ -30,7 +38,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Fomo放大镜",
+    "default_title": "Fomo Lens",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",

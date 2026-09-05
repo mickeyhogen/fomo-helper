@@ -1,4 +1,4 @@
-/*! Fomo放大镜 · Fomo Helper — © 2026 0xHogen (https://x.com/0xHogen)
+/*! Fomo Lens · Fomo放大镜 — © 2026 0xHogen (https://x.com/0xHogen)
  *  Source: https://github.com/mickeyhogen/fomo-helper · MIT License
  *  Derivative builds: keep this notice and the visible "By @0xHogen" attribution. */
 /**
@@ -9,14 +9,18 @@
  *   2. 自定义分析源         —— 用户自己配的 JSON URL 模板，没配就整段不存在
  *   3. FxTwitter 公开推文正文
  *
- * 另一路（fomo 社区 thesis / 持有人）刻意不走这里：v0.5 起 content script 直接读页面
- * 已渲染的 DOM，零网络、不碰任何登录令牌，扩展后台完全不参与。
+ * fomo 社区 thesis / 持有人仍由 fomo content script 直接读已渲染 DOM。v0.9.14 起，
+ * xxyy 可请后台临时打开同币 fomo 页并取一份最小快照；后台不读 cookie/localStorage，
+ * 不接触登录令牌，专用页取完即关。
  *
  * 消息协议：
  *   ← {type:"debot-story",    ca, force?}   → {ok:true, payload:<data.history>}
  *                                           | {ok:false, error, kind:"nostory"|"network"|"mismatch"}
  *                                           | {ok:false, error, kind:"disabled"|"absent"|"network"|"no-permission"}
  *   ← {type:"debot-tweets",   ids[], force?}→ {ok:true, payload:[{id,text,author,url}]}
+ *   ← {type:"xxyy-vue-hit",   x, y}         → {ok:true, payload:{chain,ca,resolved}}
+ *   ← {type:"fomo-token-data",ca, chain}     → {ok:true, payload:{holders,thesis,feed,share}}
+ *                                           | {ok:false, kind:"auth_required"|"unavailable"}
  */
 'use strict';
 
@@ -135,7 +139,8 @@ function hasUsableStory(history) {
 }
 
 const fetchOnce = (base, ca) =>
-  fetchJson(base + API_PATH + '?ca_address=' + encodeURIComponent(ca), TIMEOUT_MS);
+  // DeBot keys EVM records by lowercase; preserve case-sensitive Solana addresses.
+  fetchJson(base + API_PATH + '?ca_address=' + encodeURIComponent(cacheKey(ca)), TIMEOUT_MS);
 
 async function fetchStory(ca) {
   let firstFailure = '';
@@ -363,6 +368,570 @@ async function handleVersion(msg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 5) 地址反解（v0.9.9 自用·xxyy）：xxyy 会把代币 CA 302 成池子地址挂在 URL 上
+//    （实测 /sol/<mint> → /sol/<pool>），DeBot/DexScreener 都按代币 CA 取数，
+//    所以先拿 DexScreener 的 pairs 端点把池子反解成 baseToken 地址。
+//    不是池子（查不到 pair）就当它本来就是 CA 原样返回——fomo 一律走这条捷径。
+//    同信任模型：固定公网只读端点，失败静默降级。
+// ---------------------------------------------------------------------------
+
+const RESOLVE_BASE = 'https://api.dexscreener.com/latest/dex/pairs/';
+const RESOLVE_TTL_MS = 10 * 60 * 1000;
+const XXYY_POOL_ID_RE = /^0x[a-fA-F0-9]{64}$/i;
+const resolveMem = new Map();   // 'chain|addr' → {at, ca}（service worker 存活期内存缓存）
+
+async function handleResolveToken(msg) {
+  const addr = msg && typeof msg.addr === 'string' ? msg.addr.trim() : '';
+  const chain = msg && typeof msg.chain === 'string' ? msg.chain.trim().toLowerCase() : '';
+  const poolId = XXYY_POOL_ID_RE.test(addr);
+  if ((!XXYY_ADDR_RE.test(addr) && !poolId)
+      || !['solana', 'bsc', 'ethereum', 'base', 'robinhood', 'monad'].includes(chain)) return { ok: false, kind: 'network' };
+  const key = chain + '|' + (isHex(addr) || poolId ? addr.toLowerCase() : addr);
+  const hit = resolveMem.get(key);
+  if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return { ok: true, payload: { ca: hit.ca } };
+  let ca = addr;
+  let definitive = false;   // 端点真的应答了（有 pair → 反解；没 pair → 本来就是 CA），才配被缓存
+  try {
+    const r = await fetchJson(RESOLVE_BASE + encodeURIComponent(chain) + '/' + encodeURIComponent(addr), PAIRS_TIMEOUT_MS);
+    if (r.stage === 'json' && r.json) {
+      const pairs = r.json.pair ? [r.json.pair] : (Array.isArray(r.json.pairs) ? r.json.pairs : []);
+      const pair = pairs.find(p => p && p.chainId === chain && typeof p.pairAddress === 'string'
+        && (poolId ? XXYY_POOL_ID_RE.test(p.pairAddress) && p.pairAddress.toLowerCase() === addr.toLowerCase()
+          : sameCa(p.pairAddress, addr)));
+      const base = pair && pair.baseToken && typeof pair.baseToken.address === 'string' ? pair.baseToken.address.trim() : '';
+      if (XXYY_ADDR_RE.test(base)) { ca = base; definitive = true; }
+      // A 32-byte pool ID cannot fall back to being a token address.
+      else if (!poolId && !pairs.length && Object.prototype.hasOwnProperty.call(r.json, 'pairs')
+          && (r.json.pairs === null || Array.isArray(r.json.pairs))) definitive = true;
+    }
+  } catch (_) { /* 网络/解析异常 → 下面按"不缓存"处理 */ }
+  // v0.9.11（Kimi 审查 F1）：网络抖动时不能把"没反解成"缓存 10 分钟——否则这个池子在 SW 存活期内
+  // 永远显示"未收录"。失败回 ok:false，前台按原地址开卡且不缓存，主人点 ↻ / 刷新就能重试。
+  if (!definitive) return { ok: false, kind: 'network' };
+  resolveMem.set(key, { at: Date.now(), ca });
+  return { ok: true, payload: { ca } };
+}
+
+// ---------------------------------------------------------------------------
+// 6) xxyy Vue 左栏命中（v0.9.13）
+//
+// content script 默认跑在 Chrome ISOLATED world，看不到页面主世界的
+// #app._vnode。只把“当前坐标命中的行”交给 MAIN world 做一次只读探测，
+// 再把 chain/CA/是否已反解这三个经过白名单校验的字段带回来。
+// 不常驻注入 page script，不开 window message 通道，页面也拿不到扩展 API。
+// ---------------------------------------------------------------------------
+
+/**
+ * 这个函数由 chrome.scripting 序列化后在 MAIN world 执行：必须完全自包含。
+ * 返回值刻意裁成最小 JSON，不得把 vnode/props 或任何页面对象透传给扩展。
+ */
+function probeXxyyVueAtPoint(x, y) {
+  const ADDR_RE = /^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+  const POOL_ID_RE = /^0x[a-fA-F0-9]{64}$/i;
+  const USERISH_RE = /user|wallet|profile|owner|creator|follower|account/i;
+  const TOKEN_KEY_RE = /^(token(address|ca|mint)?|mint(address)?|ca|contract(address)?|basetoken(address)?)$/i;
+  const POOL_KEY_RE = /^(pair(address)?|pool(address)?|amm(address)?)$/i;
+  const CHAIN_IDS = { 1: 'ethereum', 56: 'bsc', 8453: 'base', 1399811149: 'solana', 4663: 'robinhood', 143: 'monad' };
+  const CHAIN_NAMES = { sol: 'solana', solana: 'solana', bsc: 'bsc', bnb: 'bsc', eth: 'ethereum', ethereum: 'ethereum', base: 'base', robin: 'robinhood', robinhood: 'robinhood', monad: 'monad' };
+
+  const own = (obj, key) => {
+    try {
+      const d = Object.getOwnPropertyDescriptor(obj, key);
+      return d && Object.prototype.hasOwnProperty.call(d, 'value') ? d.value : undefined;
+    } catch (_) { return undefined; }
+  };
+
+  const itemToHit = (item) => {
+    if (!item || typeof item !== 'object') return null;
+    let ca = '';
+    let pool = '';
+    let chain = null;
+    let keys;
+    try { keys = Object.keys(item).slice(0, 80); } catch (_) { return null; }
+    for (const key of keys) {
+      const val = own(item, key);
+      if (typeof val === 'string' && (ADDR_RE.test(val) || POOL_ID_RE.test(val))) {
+        if (!ca && TOKEN_KEY_RE.test(key) && ADDR_RE.test(val)) ca = val;
+        else if (!pool && POOL_KEY_RE.test(key) && (ADDR_RE.test(val) || POOL_ID_RE.test(val))) pool = val;
+      } else if ((typeof val === 'string' || typeof val === 'number')
+          && /^(chain(id|name)?|network(id)?|allowChain|tokenChain)$/i.test(key)) {
+        const slug = String(val).toLowerCase();
+        chain = CHAIN_NAMES[slug] || CHAIN_IDS[slug] || chain;
+      }
+    }
+    if (ca) return { chain, ca, resolved: true };
+    if (pool) return { chain, ca: pool, resolved: false };
+    return null;
+  };
+
+  const scanProps = (props) => {
+    const queue = [[props, 0]];
+    let visited = 0;
+    while (queue.length && visited++ < 200) {
+      const pair = queue.shift();
+      const obj = pair[0];
+      const depth = pair[1];
+      if (!obj || typeof obj !== 'object') continue;
+      const hit = itemToHit(obj);
+      if (hit) return hit;
+      if (depth >= 3) continue;
+      let keys;
+      try { keys = Object.keys(obj).slice(0, 40); } catch (_) { continue; }
+      for (const key of keys) {
+        if (USERISH_RE.test(key)) continue;
+        const val = own(obj, key);
+        if (val && typeof val === 'object' && !Array.isArray(val)) queue.push([val, depth + 1]);
+      }
+    }
+    return null;
+  };
+
+  // Monitor rows carry the CA under tokenInfo.address and the chain on the event.
+  // Scope generic `address` to this exact token object; never scan wallet/transfer addresses.
+  const monitorToHit = (data) => {
+    if (!data || typeof data !== 'object') return null;
+    const transfer = Number(own(data, 'eventType')) === 1;
+    const event = own(data, transfer ? 'transferData' : 'tradeData');
+    const token = own(data, 'tokenInfo');
+    const ca = own(data, 'tokenAddress') || own(token, 'address');
+    const rawChain = own(event, 'chain') || own(data, 'chain');
+    const chain = CHAIN_NAMES[String(rawChain).toLowerCase()] || CHAIN_IDS[String(rawChain)];
+    if (!chain || typeof ca !== 'string' || !ADDR_RE.test(ca)) return null;
+    return { chain, ca, resolved: true };
+  };
+
+  /**
+   * xxyy 列表页 URL 不带链，实站的 token item 也未必带 chainId。
+   * 选中链在更上层 tokens/memeMain 组件的 ctx.chainId，只读精确键名的标量值。
+   */
+  const chainFromAncestors = (start) => {
+    let instance = start;
+    for (let up = 0; up < 14 && instance; up++, instance = own(instance, 'parent')) {
+      for (const bucketName of ['props', 'ctx', 'setupState', 'data']) {
+        const bucket = own(instance, bucketName);
+        if (!bucket || typeof bucket !== 'object') continue;
+        // A widget can show a different chain from the page's global chain selector.
+        for (const key of ['tokenChain', 'allowChain', 'curChain', 'defaultChainId', 'chain', 'chainId', 'chainName', 'network', 'networkId']) {
+          let val = own(bucket, key);
+          // Vue 的 ctx 对外暴露值是 accessor（实站 chainId 的 descriptor 只有 getter）。
+          // 只对上面精确白名单的链键允许读 getter，并且读完立刻收窄到 string/number。
+          if (val === undefined) { try { val = bucket[key]; } catch (_) { val = undefined; } }
+          // Vue ref 只允许解一层 value，其它对象不下钻。
+          if (val && typeof val === 'object') val = own(val, 'value');
+          if (typeof val !== 'string' && typeof val !== 'number') continue;
+          const slug = String(val).toLowerCase();
+          const chain = CHAIN_NAMES[slug] || CHAIN_IDS[slug];
+          if (chain) return chain;
+        }
+      }
+    }
+    return null;
+  };
+
+  let target;
+  let row;
+  let root;
+  try {
+    target = document.elementFromPoint(Number(x), Number(y));
+    row = target && target.closest
+      && (target.closest('.vue-recycle-scroller__item-view')
+        || target.closest('.virtual-wrap [role="item"], .monitor-item, .multi-wallet-monitor-item, .row'));
+    root = document.querySelector('#app');
+  } catch (_) { return null; }
+  if (!target || !row || !root || !root.contains(row)) return null;
+
+  const rootVnode = own(root, '_vnode');
+  if (!rootVnode) return null;
+
+  // 目标和近邻祖先元素作为候选；找到距光标最近的 vnode 所属组件。
+  const candidates = new Map();
+  let node = target;
+  for (let i = 0; i < 8 && node && node !== document.body; i++, node = node.parentElement) {
+    candidates.set(node, i);
+  }
+  const seen = new Set();
+  let best = null;
+  let bestDistance = 99;
+  let vnodeCount = 0;
+  const rowInstances = new Set();
+  const walk = (vnode, instance, depth) => {
+    if (!vnode || typeof vnode !== 'object' || vnodeCount >= 60000 || depth > 150) return;
+    if (seen.has(vnode)) return;
+    seen.add(vnode);
+    vnodeCount++;
+    const el = own(vnode, 'el');
+    // VirtualList may retain detached/empty `el` references on a row's hoisted wrappers.
+    // Its live leaves still identify the component owning this exact DOM row.
+    if (el && instance && rowInstances.size < 40 && row.contains(el)) rowInstances.add(instance);
+    if (el && instance && candidates.has(el)) {
+      const distance = candidates.get(el);
+      if (distance < bestDistance) { bestDistance = distance; best = instance; }
+    }
+    const component = own(vnode, 'component');
+    if (component) {
+      walk(own(component, 'subTree'), component, depth + 1);
+      return;
+    }
+    const suspense = own(vnode, 'suspense');
+    const ssContent = own(vnode, 'ssContent');
+    if (suspense && ssContent) walk(ssContent, instance, depth + 1);
+    const children = own(vnode, 'children');
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        if (child && typeof child === 'object') walk(child, instance, depth + 1);
+      }
+    }
+  };
+  try { walk(rootVnode, null, 0); } catch (_) { return null; }
+
+  let hit = null;
+  let instance = best;
+  // Prefer the complete event over child image/wallet tooltip props, which omit its chain.
+  for (let up = 0; up < 6 && instance; up++, instance = own(instance, 'parent')) {
+    const data = own(own(instance, 'props'), 'monitorData');
+    if (data && typeof data === 'object') return monitorToHit(data);
+  }
+  instance = best;
+  for (let up = 0; up < 3 && instance && !hit; up++) {
+    try { hit = scanProps(own(instance, 'props')); } catch (_) { hit = null; }
+    instance = own(instance, 'parent');
+  }
+  if (!hit) {
+    for (const candidate of rowInstances) {
+      const props = own(candidate, 'props');
+      const monitor = own(props, 'monitorData');
+      if (monitor && typeof monitor === 'object') return monitorToHit(monitor);
+      const token = own(props, 'tokenData');
+      if (!token || typeof token !== 'object') continue;
+      hit = itemToHit(token);
+      if (hit) { best = candidate; break; }
+    }
+  }
+  if (!hit || !(ADDR_RE.test(String(hit.ca || '')) || (hit.resolved !== true && POOL_ID_RE.test(String(hit.ca || ''))))) return null;
+  if (!hit.chain) hit.chain = chainFromAncestors(best);
+  const allowedChains = ['solana', 'bsc', 'ethereum', 'base', 'robinhood', 'monad'];
+  const chain = allowedChains.indexOf(String(hit.chain || '').toLowerCase()) !== -1
+    ? String(hit.chain).toLowerCase() : null;
+  return { chain, ca: String(hit.ca), resolved: hit.resolved === true };
+}
+
+const XXYY_ADDR_RE = /^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+
+async function handleXxyyVueHit(msg, sender) {
+  let source;
+  try { source = new URL(String((sender && sender.url) || '')); } catch (_) { return { ok: false, kind: 'network' }; }
+  if (source.protocol !== 'https:' || !['pro.xxyy.io', 'www.xxyy.io'].includes(source.hostname.toLowerCase())) {
+    return { ok: false, kind: 'network' };
+  }
+  if (!sender.tab || !Number.isInteger(sender.tab.id) || Number(sender.frameId || 0) !== 0) {
+    return { ok: false, kind: 'network' };
+  }
+  const x = Number(msg && msg.x);
+  const y = Number(msg && msg.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 20000 || y > 20000) {
+    return { ok: false, kind: 'network' };
+  }
+  try {
+    const out = await chrome.scripting.executeScript({
+      target: { tabId: sender.tab.id, frameIds: [sender.frameId || 0] },
+      world: 'MAIN',
+      func: probeXxyyVueAtPoint,
+      args: [x, y],
+    });
+    const hit = out && out[0] && out[0].result;
+    if (!hit || !(XXYY_ADDR_RE.test(String(hit.ca || ''))
+        || (hit.resolved !== true && XXYY_POOL_ID_RE.test(String(hit.ca || ''))))) return { ok: false, kind: 'network' };
+    const allowedChains = ['solana', 'bsc', 'ethereum', 'base', 'robinhood', 'monad'];
+    const chain = allowedChains.indexOf(String(hit.chain || '').toLowerCase()) !== -1
+      ? String(hit.chain).toLowerCase() : null;
+    return { ok: true, payload: { chain, ca: String(hit.ca), resolved: hit.resolved === true } };
+  } catch (_) {
+    return { ok: false, kind: 'network' };
+  }
+}
+
+// GMGN React rows are page-world objects, just like the xxyy Vue rows above.
+// Run only on demand and return a minimal token identity, never page props.
+function probeGmgnReactAtPoint(x, y) {
+  if (location.protocol !== 'https:' || location.hostname !== 'gmgn.ai') return null;
+  const CHAINS = {sol:'solana',solana:'solana',eth:'ethereum',ethereum:'ethereum',bsc:'bsc',bnb:'bsc',base:'base',tron:'tron',blast:'blast',robinhood:'robinhood',monad:'monad',xlayer:'xlayer'};
+  const normalizeChain = v => CHAINS[String(v || '').toLowerCase()] || null;
+  const valid = (ca, chain) => typeof ca === 'string' && (chain === 'solana'
+    ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ca)
+    : chain === 'tron' ? /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(ca) : /^0x[a-fA-F0-9]{40}$/.test(ca));
+  const own = (o,k) => {try {const d=Object.getOwnPropertyDescriptor(o,k);return d&&'value' in d?d.value:undefined;}catch(_){return undefined;}};
+  const keys = o => {try{return Object.keys(o).slice(0,60);}catch(_){return [];}};
+  const pageChain = normalizeChain(location.pathname.split('/')[1]) || normalizeChain(new URL(location.href).searchParams.get('chain'));
+  const readProps = props => {
+    const found = new Map();
+    const queue = [{o:props,d:0,token:false,chain:null}];
+    const seen = new Set();
+    for(let n=0;queue.length&&n<120;n++){
+      const {o,d,token,chain:inherited}=queue.shift();
+      if(!o||typeof o!=='object'||Array.isArray(o)||seen.has(o))continue;
+      seen.add(o);
+      const chain=normalizeChain(own(o,'chain'))||normalizeChain(own(o,'chainName'))||normalizeChain(own(o,'chain_name'))||inherited;
+      for(const k of keys(o)){
+        if(/user|wallet|profile|owner|creator|account|pair|pool/i.test(k))continue;
+        const v=own(o,k);
+        const tokenKey=/^(token_?address|token_?ca|token_?mint|mint_?address|mint|ca|contract_?address)$/i.test(k);
+        if(typeof v==='string' && (tokenKey||(token&&/^(address|ca|mint)$/i.test(k)))){
+          const c=chain||pageChain;
+          if(c&&valid(v,c))found.set(c+'|'+(v.startsWith('0x')?v.toLowerCase():v),{chain:c,ca:v,resolved:true});
+        }
+        if(d<3&&v&&typeof v==='object'&&!Array.isArray(v)&&/^(item|row|data|info|token|tokenInfo|token_info|baseToken|base_token|coin)$/i.test(k)){
+          queue.push({o:v,d:d+1,token:/token|coin/i.test(k),chain});
+        }
+      }
+    }
+    return found.size===1?Array.from(found.values())[0]:null;
+  };
+  // React keeps two fiber trees. The DOM expando may still reference the
+  // previous tree after a commit; resolve the committed branch before reading.
+  const committedFiber = fiber => {
+    if (!fiber) return null;
+    let root = fiber;
+    for (let up = 0; own(root,'return') && up < 80; up++) root = own(root,'return');
+    const holder = own(root,'stateNode');
+    const current = holder && own(holder,'current');
+    if (current === root) return fiber;
+    if (current && current === own(root,'alternate')) return own(fiber,'alternate') || null;
+    return own(fiber,'alternate') ? null : fiber;
+  };
+  let target;
+  try {target=document.elementFromPoint(x,y);}catch(_){return null;}
+  if(!target||target.closest('nav,footer,[role="navigation"],[data-fomo-debot]'))return null;
+  for(let el=target,up=0;el&&el!==document.body&&up<8;el=el.parentElement,up++){
+    const rect=el.getBoundingClientRect();
+    if(rect.height>180||rect.width>innerWidth*0.6)break;
+    const propsKey=keys(el).find(k=>k.startsWith('__reactProps'));
+    if(propsKey){const hit=readProps(own(el,propsKey));if(hit)return hit;}
+    const fiberKey=keys(el).find(k=>k.startsWith('__reactFiber'));
+    let fiber=committedFiber(fiberKey&&own(el,fiberKey));
+    for(let hop=0;fiber&&hop<6;hop++,fiber=own(fiber,'return')){
+      const dom=own(fiber,'stateNode');
+      if(dom&&dom.nodeType===1){const r=dom.getBoundingClientRect();if(r.height>180||r.width>innerWidth*0.6)break;}
+      const hit=readProps(own(fiber,'memoizedProps'));if(hit)return hit;
+    }
+  }
+  return null;
+}
+
+async function handleGmgnReactHit(msg, sender) {
+  let source;
+  try{source=new URL(String(sender&&sender.url||''));}catch(_){return {ok:false,kind:'network'};}
+  if(source.protocol!=='https:'||source.hostname!=='gmgn.ai'||!sender.tab||!Number.isInteger(sender.tab.id)||sender.frameId!==0)return {ok:false,kind:'network'};
+  const x=Number(msg&&msg.x),y=Number(msg&&msg.y);
+  if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>20000||y>20000)return {ok:false,kind:'network'};
+  try{
+    const out=await chrome.scripting.executeScript({target:{tabId:sender.tab.id,frameIds:[0]},world:'MAIN',func:probeGmgnReactAtPoint,args:[x,y]});
+    const hit=out&&out[0]&&out[0].result;
+    const chains=['solana','ethereum','bsc','base','tron','blast','robinhood','monad','xlayer'];
+    if(!hit||!chains.includes(hit.chain)||!XXYY_ADDR_RE.test(String(hit.ca||'')))return {ok:false,kind:'network'};
+    return {ok:true,payload:{chain:hit.chain,ca:String(hit.ca),resolved:true}};
+  }catch(_){return {ok:false,kind:'network'};}
+}
+
+// ---------------------------------------------------------------------------
+// 7) GMGN / xxyy → Fomo 登录态读取
+//
+// fomo 的 Holders/Thesis 数据只稳定存在于登录后渲染的页面 DOM。这里不复制登录态、
+// 不读任何浏览器存储：先只读已打开的同币页，不足时开一个 inactive token tab，
+// 向匹配的 content script 请求最小字段快照。只关闭自己创建的临时页；跨币取消旧任务。
+// ---------------------------------------------------------------------------
+
+const FOMO_MIRROR_WAIT_MS = 15000;
+const FOMO_MIRROR_POLL_MS = 350;
+const FOMO_MIRROR_MESSAGE_TIMEOUT_MS = 2500;
+const FOMO_MIRROR_AUTH_GRACE_MS = 1800;  // Exact auth_required must persist this long; page loading cannot consume the grace.
+const FOMO_MIRROR_TTL_MS = 60 * 1000;
+const FOMO_MIRROR_AUTH_TTL_MS = 5 * 1000;
+const FOMO_ROUTE_CHAIN = {
+  solana: 'solana', bsc: 'bnb', ethereum: 'ethereum', base: 'base', robinhood: 'robinhood',
+};
+const fomoMirrorCache = new Map();
+const fomoMirrorActive = new Map(); // One cancellable reader per requesting tab across both sites.
+
+const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function createInactiveTab(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.create({ url, active: false }, (tab) => {
+        const err = chrome.runtime.lastError;
+        if (err || !tab || !Number.isInteger(tab.id)) reject(new Error('tab_create_failed'));
+        else resolve(tab);
+      });
+    } catch (_) { reject(new Error('tab_create_failed')); }
+  });
+}
+
+function sendToTab(tabId, msg, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = null;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    };
+    timer = setTimeout(() => finish(null), Math.max(1, Number(timeoutMs) || FOMO_MIRROR_MESSAGE_TIMEOUT_MS));
+    try {
+      chrome.tabs.sendMessage(tabId, msg, (resp) => {
+        const err = chrome.runtime.lastError;
+        finish(err ? null : (resp || null));
+      });
+    } catch (_) { finish(null); }
+  });
+}
+
+function closeMirrorTab(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  try { chrome.tabs.remove(tabId, () => { void chrome.runtime.lastError; }); } catch (_) { /* 已关闭 */ }
+}
+
+function validFomoMirrorSender(sender) {
+  let source;
+  try { source = new URL(String((sender && sender.url) || '')); } catch (_) { return false; }
+  return source.protocol === 'https:' && ['gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(source.hostname.toLowerCase())
+    && !!sender.tab && Number.isInteger(sender.tab.id) && Number(sender.frameId || 0) === 0;
+}
+
+function findExistingFomoTab(fomoUrl) {
+  const target = new URL(fomoUrl);
+  const canonical = (p) => {
+    const parts = p.replace(/\/$/, '').split('/');
+    if (/^0x/i.test(parts.at(-1) || '')) parts[parts.length - 1] = parts.at(-1).toLowerCase();
+    return parts.join('/');
+  };
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ url: 'https://fomo.family/tokens/*' }, (tabs) => {
+        if (chrome.runtime.lastError) return resolve([]);
+        const matching = (tabs || []).filter((t) => {
+          try { return Number.isInteger(t.id) && canonical(new URL(t.url).pathname) === canonical(target.pathname); }
+          catch (_) { return false; }
+        });
+        resolve(matching.sort((a, b) => Number(b.active) - Number(a.active)).slice(0, 4));
+      });
+    } catch (_) { resolve([]); }
+  });
+}
+
+function readyFomoResult(job, snap, fomoUrl) {
+  const result = {
+    ok: true, fomoUrl,
+    payload: {
+      holders: Array.isArray(snap.holders) ? snap.holders : [],
+      thesis: Array.isArray(snap.thesis) ? snap.thesis : [],
+      thesisTotal: Number.isSafeInteger(snap.thesisTotal) && snap.thesisTotal >= 0
+        && snap.thesisTotal <= 1000000 ? snap.thesisTotal : (Array.isArray(snap.thesis) ? snap.thesis.length : 0),
+      feed: Array.isArray(snap.feed) ? snap.feed : [],
+      share: snap.share && typeof snap.share === 'object' ? snap.share : null,
+      fomoUrl,
+    },
+  };
+  if (!job.cancelled) {
+    fomoMirrorCache.set(job.key, { at: Date.now(), ttl: FOMO_MIRROR_TTL_MS, result });
+    if (fomoMirrorCache.size > 100) fomoMirrorCache.clear();
+  }
+  return job.cancelled ? { ok: false, kind: 'superseded', fomoUrl } : result;
+}
+
+async function readFomoMirror(job, ca, chain, fomoUrl) {
+  const started = Date.now();
+  try {
+    // Preserve the existing page's loaded holder coverage and filters. This path never
+    // scrolls, clicks, navigates or closes an owner tab; only the fallback tab is owned.
+    const existing = await findExistingFomoTab(fomoUrl);
+    let pending = existing;
+    for (let round = 0; pending.length && round < 4 && !job.cancelled; round++) {
+      const next = [];
+      for (const ownerTab of pending) {
+        if (job.cancelled || Date.now() - started >= 4000) break;
+        const resp = await sendToTab(ownerTab.id, { type: 'fomo-mirror-snapshot', ca, chain, readOnly: true }, 800);
+        const snap = resp && resp.ok && resp.payload;
+        if (snap && snap.status === 'ready') return readyFomoResult(job, snap, fomoUrl);
+        if (snap && snap.status === 'pending') next.push(ownerTab);
+      }
+      pending = next;
+      await waitMs(FOMO_MIRROR_POLL_MS);
+    }
+    if (job.cancelled) return { ok: false, kind: 'superseded', fomoUrl };
+    const tab = await createInactiveTab(fomoUrl);
+    job.tabId = tab.id;
+    let authObservedSince = null;
+    let readyObservedSince = null;
+    let latestReady = null;
+    if (job.cancelled) return { ok: false, kind: 'superseded', fomoUrl };
+
+    while (!job.cancelled && Date.now() - started < FOMO_MIRROR_WAIT_MS) {
+      const remaining = FOMO_MIRROR_WAIT_MS - (Date.now() - started);
+      const resp = await sendToTab(tab.id, { type: 'fomo-mirror-snapshot', ca, chain },
+        Math.min(FOMO_MIRROR_MESSAGE_TIMEOUT_MS, Math.max(1, remaining)));
+      if (job.cancelled) return { ok: false, kind: 'superseded', fomoUrl };
+      const snap = resp && resp.ok && resp.payload;
+      if (snap && snap.status === 'ready') {
+        // Holders can render before the market-cap strip and Thesis cells.
+        // Give those fields a short bounded grace instead of caching the first partial frame.
+        if (readyObservedSince === null) readyObservedSince = Date.now();
+        latestReady = snap;
+        if ((snap.share && Array.isArray(snap.thesis) && snap.thesis.length)
+            || Date.now() - readyObservedSince >= 1800) return readyFomoResult(job, snap, fomoUrl);
+      } else { latestReady = null; readyObservedSince = null; }
+      if (snap && snap.status === 'auth_required') {
+        if (authObservedSince === null) authObservedSince = Date.now();
+        if (Date.now() - authObservedSince >= FOMO_MIRROR_AUTH_GRACE_MS) {
+          const result = { ok: false, kind: 'auth_required', fomoUrl };
+          fomoMirrorCache.set(job.key, { at: Date.now(), ttl: FOMO_MIRROR_AUTH_TTL_MS, result });
+          return result;
+        }
+      } else authObservedSince = null;
+      await waitMs(FOMO_MIRROR_POLL_MS);
+    }
+    if (!job.cancelled && latestReady) return readyFomoResult(job, latestReady, fomoUrl);
+    return { ok: false, kind: job.cancelled ? 'superseded' : 'unavailable', fomoUrl };
+  } catch (_) {
+    return { ok: false, kind: job.cancelled ? 'superseded' : 'unavailable', fomoUrl };
+  } finally {
+    closeMirrorTab(job.tabId);
+  }
+}
+
+async function handleFomoTokenData(msg, sender) {
+  if (!validFomoMirrorSender(sender)) return { ok: false, kind: 'unavailable' };
+  const ca = msg && typeof msg.ca === 'string' ? msg.ca.trim() : '';
+  const chain = msg && typeof msg.chain === 'string' ? msg.chain.trim().toLowerCase() : '';
+  const routeChain = FOMO_ROUTE_CHAIN[chain];
+  if (!XXYY_ADDR_RE.test(ca) || !routeChain) return { ok: false, kind: 'unavailable' };
+  const key = chain + '|' + cacheKey(ca);  // base58 大小写敏感；只有 0x 地址可归一小写
+  const fomoUrl = 'https://fomo.family/tokens/' + routeChain + '/' + ca;
+
+  if (!msg.force) {
+    const hit = fomoMirrorCache.get(key);
+    if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
+    if (hit) fomoMirrorCache.delete(key);
+  }
+  const ownerTabId = sender.tab.id;
+  const active = fomoMirrorActive.get(ownerTabId);
+  if (active && active.key === key && !active.cancelled) {
+    return active.promise;
+  }
+  if (active) {
+    active.cancelled = true;
+    closeMirrorTab(active.tabId);
+  }
+
+  const job = { key, tabId: null, cancelled: false, promise: null };
+  job.promise = readFomoMirror(job, ca, chain, fomoUrl).finally(() => {
+    if (fomoMirrorActive.get(ownerTabId) === job) fomoMirrorActive.delete(ownerTabId);
+  });
+  fomoMirrorActive.set(ownerTabId, job);
+  return job.promise;
+}
+
 const ROUTES = {
   'version-check': handleVersion,
   'debot-story': handleStory,
@@ -370,6 +939,10 @@ const ROUTES = {
   'analysis-doc': async () => ({ ok: false, kind: 'disabled' }),
   'debot-tweets': handleTweets,
   'dex-pairs': handlePairs,
+  'resolve-token': handleResolveToken,
+  'xxyy-vue-hit': handleXxyyVueHit,
+  'gmgn-react-hit': handleGmgnReactHit,
+  'fomo-token-data': handleFomoTokenData,
 };
 
 const CA_SHAPE_RE = /^[A-Za-z0-9]{1,64}$/;
@@ -383,8 +956,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   const fn = msg && ROUTES[msg.type];
   if (!fn) return false;
-  fn(msg).then(sendResponse).catch(() => {
+  fn(msg, sender).then(sendResponse).catch(() => {
     sendResponse({ ok: false, kind: 'network', error: '后台处理异常' });
   });
   return true; // 异步响应
 });
+
+// Chrome invalidates old content-script connections when an extension is reloaded.
+// Reinstall only our isolated UI in supported top frames; preserve the page and login.
+async function reconnectOpenTabs() {
+  const matches = ['https://fomo.family/*', 'https://gmgn.ai/*', 'https://pro.xxyy.io/*', 'https://www.xxyy.io/*'];
+  let tabs;
+  try { tabs = await chrome.tabs.query({ url: matches, discarded: false }); }
+  catch (_) { return; }
+  await Promise.allSettled(tabs.map(async tab => {
+    if (!Number.isInteger(tab.id)) return;
+    const health = await sendToTab(tab.id, { type: 'lens-health' }, 800);
+    if (health && health.ok) return;
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ['content.js'], world: 'ISOLATED' });
+  }));
+}
+if (chrome.runtime.onInstalled) chrome.runtime.onInstalled.addListener(() => { reconnectOpenTabs().catch(() => {}); });
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(() => { reconnectOpenTabs().catch(() => {}); });

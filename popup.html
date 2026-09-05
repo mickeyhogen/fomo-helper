@@ -3,7 +3,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>Fomo放大镜</title>
+<title>Fomo Lens</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -40,48 +40,80 @@
   .field { padding: 7px 0; }
   .field + .field { border-top: 1px solid #1a1c20; }
   .field label { display: block; margin-bottom: 4px; }
+  .msg { font-size: 11px; margin-top: 4px; min-height: 14px; }
+  .msg.err { color: #ff7b72; }
+  .msg.ok { color: #6fd8ab; }
+  .adv { padding: 8px 0 2px; border-top: 1px solid #1a1c20; margin-top: 2px; }
+  .adv .row { padding: 4px 0; align-items: flex-start; }
+  .warn-lbl { color: #ff9d92; font-size: 11px; line-height: 1.45; cursor: pointer; }
+  .warn-hint { color: #7f8590; font-size: 11px; margin-top: 2px; }
+  .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2024;
+          font-size: 11px; color: #62666e; }
   .byline { margin-top: 4px; color: #4a4d54; letter-spacing: .3px; }
   .bylink { color: #6a6e76; text-decoration: none; }
   .bylink:hover { color: #9aa0aa; text-decoration: underline; }
-  .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2024;
-          font-size: 11px; color: #62666e; }
+  .rng { display: flex; align-items: center; gap: 6px; }
+  .row > .rng { flex: 0 0 auto; }
+  .rng input[type=range] { width: 92px; accent-color: #5b9cff; }
+  .rng b { font-weight: 600; color: #cfd2d8; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
 </style>
 </head>
 <body>
-  <h1>Fomo放大镜</h1>
-  <p class="sub">在 fomo.family 上聚合叙事、社区观点与持仓结构</p>
+  <h1 data-i18n="title">Fomo Lens</h1>
+  <p class="sub" data-i18n="intro">在 Fomo、GMGN 和 xxyy 查看叙事、观点与持仓；请先在同一浏览器登录 Fomo</p>
 
   <div class="group">
-    <div class="gtitle">通用</div>
+    <div class="gtitle" data-i18n="general">通用</div>
     <div class="field">
-      <label for="openMode">自动弹出模式</label>
+      <label for="openMode" data-i18n="openMode">自动弹出模式</label>
       <select id="openMode">
-        <option value="compact">精简展开（只显示起源+评级理由）</option>
-        <option value="full">全部展开</option>
-        <option value="off">不自动弹出（点右下角按钮才显示）</option>
+        <option value="compact" data-i18n="compact">精简展开（只显示起源+评级理由）</option>
+        <option value="full" data-i18n="full">全部展开</option>
+        <option value="off" data-i18n="off">不自动弹出（点右下角按钮才显示）</option>
       </select>
-      <div class="hint">精简为默认；不自动弹出时点右下角「🔍」钮才显示</div>
+      <div class="hint" data-i18n="openHint">精简为默认；不自动弹出时点右下角「🔍」钮才显示</div>
     </div>
     <div class="row">
       <span>
-        <label for="hoverPreview">悬停预览</label>
-        <div class="hint">划过左栏行即预览</div>
+        <label for="hoverPreview" data-i18n="hover">悬停预览</label>
+        <div class="hint" data-i18n="hoverHint">划过左栏行即预览</div>
       </span>
       <input type="checkbox" id="hoverPreview">
     </div>
     <div class="row">
       <span>
-        <label for="lang">默认语言</label>
-        <div class="hint">卡片内可随时切换</div>
+        <label for="lang" data-i18n="language">默认语言</label>
+        <div class="hint" data-i18n="languageHint">卡片内可随时切换</div>
       </span>
       <select id="lang">
         <option value="zh">中文</option>
         <option value="en">English</option>
       </select>
     </div>
+    <div class="row">
+      <span>
+        <label for="updateCheck" data-i18n="edition">检查更新</label>
+        <div class="hint" data-i18n="updateHint">每 6 小时检查 GitHub 新版；可关闭</div>
+      </span>
+      <input type="checkbox" id="updateCheck">
+    </div>
+    <div class="row">
+      <span>
+        <label for="brightness" data-i18n="brightness">卡片亮度</label>
+        <div class="hint">50%–150%</div>
+      </span>
+      <span class="rng"><input type="range" id="brightness" min="50" max="150" step="5" value="100"><b id="brightnessVal">100%</b></span>
+    </div>
+    <div class="row">
+      <span>
+        <label for="opacity" data-i18n="opacity">卡片透明度</label>
+        <div class="hint" data-i18n="opacityHint">35%–100%；卡片头部 ☀ 也能调</div>
+      </span>
+      <span class="rng"><input type="range" id="opacity" min="35" max="100" step="5" value="100"><b id="opacityVal">100%</b></span>
+    </div>
   </div>
 
-  <div class="foot">设置改完即时生效。
+  <div class="foot"><span data-i18n="footer">设置改完即时生效。</span>
     <div class="byline"><span id="bver">Fomo放大镜</span> · by <a class="bylink" href="https://x.com/0xHogen" target="_blank" rel="noopener noreferrer">@0xHogen</a> · <a class="bylink" href="https://github.com/mickeyhogen/fomo-helper" target="_blank" rel="noopener noreferrer" title="源码 / 反馈 · Source / Issues">GitHub</a></div>
   </div>
   <script src="popup.js"></script>

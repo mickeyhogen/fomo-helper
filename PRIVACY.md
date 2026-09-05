@@ -1,51 +1,49 @@
-# 隐私说明 / Privacy Policy
+# Privacy / 隐私说明
 
-**这个扩展没有后端。** 没有服务器代码，没有账号体系，没有遥测。所以「偷偷上传你的数据」
-不是一句我们不做的承诺，而是一件这套代码做不到的事。
+Fomo Lens has no developer-operated collection server, telemetry or extension account. It reads supported token pages and queries the fixed services below. It does not place trades or connect to a wallet.
 
-## 它碰得到的地方，一共两个
+Fomo Lens 没有开发者自建采集服务器、遥测或扩展账号。它读取支持站点的代币页面，并访问下列固定服务；不会下单或连接钱包。
 
-| 接触点 | 用途 | 性质 |
-| --- | --- | --- |
-| `app.debot.ai`（备用 `debot.ai`） | 拉取代币叙事分析 | 公开接口，不登录、不带 cookie、无 key |
-| `api.fxtwitter.com` | 叙事来源推文正文 | 公开只读，不登录、不发帖 |
-| `api.dexscreener.com` | 这只币的流动性池/交易对（头部 chips） | 公开只读，不登录、无 key |
-| `api.github.com` | 版本检测：查本项目最新发布版本号（每 6 小时一次，可在设置里关闭） | 公开只读，不登录、无 key、不发送任何页面或代币信息 |
+## Website access / 站点访问
 
-观点与持仓者两页**完全不联网**：它们直接读 fomo 页面上已经渲染好的内容，一个请求都不发。
+The content script runs on `https://fomo.family/*`, `https://gmgn.ai/*`, `https://pro.xxyy.io/*` and `https://www.xxyy.io/*`.
 
-## 要诚实说清的一件事
+On Fomo it reads rendered token data. On GMGN and XXYY, a bounded, read-only page probe identifies the hovered token's chain and contract address. For Thesis, Holders and holding share, the extension reads an existing matching Fomo page or opens an inactive temporary token page. Temporary pages use the browser's existing Fomo login, make the normal requests of that website, and are closed after reading. Existing Fomo pages are not clicked, scrolled or navigated by the reader.
 
-你每看一个代币，它的合约地址会发给 DeBot、相关推文 ID 会发给 FxTwitter。
-**这两个第三方的服务器因此能在自己的日志里看到「某个 IP 在某时刻查了某个代币」。**
-这是任何拉取式工具都绕不开的——但那不是我们在采集你，我们既没有服务器也收不到这些数据。
-介意的话，只用观点/持仓者两页即可，那两页零网络。
+脚本只注入上述精确域名。在 Fomo 读取已渲染内容；在 GMGN / XXYY 用有界只读探针识别悬停代币的链和 CA。观点、持有人和持仓占比读取已有的同币 Fomo 页，或打开临时后台代币页。临时页复用浏览器现有登录，正常向 Fomo 请求页面数据，读完关闭；不会点击、滚动或跳转已有 Fomo 页面。因此三站取数不能称为“零网络”。
 
-## 它做不到的事
+The extension does not extract, store or forward login cookies, session tokens, private keys or seed phrases. It does not have cookie or wallet permissions. Login is completed directly on Fomo, never in this extension.
 
-- **不读你的 fomo 登录态**：扩展不向 fomo.family 发任何网络请求，不读取、不存储、不外发页面里的任何令牌。
-- **不碰钱包**：没有任何相关权限。
-- **不注入别的网站**：content script 只匹配 `https://fomo.family/*`，别的站点上它完全不存在。
-- **不申请通配域名权限**：manifest 里只有上面那两个固定域名，没有 `<all_urls>`，没有可选通配权限。
-- **不采集浏览行为**：无遥测、无统计、无指纹。
+扩展不提取、存储或外发登录 cookie、会话令牌、私钥或助记词，没有 cookie 或钱包权限。登录在 Fomo 网站上完成。
 
-所有设置只写在浏览器本地 `chrome.storage`，卸载即清除。
+## Fixed services / 固定服务
 
-## 关于「自定义分析源」
+| Service | Data and purpose |
+| --- | --- |
+| `app.debot.ai`, `debot.ai` | Contract address → narrative. Public request without login credentials. / CA 查询叙事，不带登录凭证。 |
+| `api.fxtwitter.com` | Tweet ID → source tweet. / 按推文 ID 读取来源正文。 |
+| `api.dexscreener.com` | Contract/pool address and chain → token resolution and pool information. / 解析池子与交易对。 |
+| `api.github.com` | Latest release for `mickeyhogen/fomo-helper`; no token, wallet or page data is sent. / 检查本项目新版，不发送代币、钱包或网页数据。 |
+| `fomo.family` | Token page loads using the browser's existing login when needed. / 必要时用现有登录加载代币页。 |
 
-早期自用版本允许填写自己的分析源 URL，这意味着扩展要替你去访问一个任意地址。
-这类能力一旦公开发布，就会变成别人用来做内网探测（SSRF）的入口。
-**公开版把这条路整个拆掉了**：设置面板里没有这一项，代码里没有对应的请求路径，
-manifest 里也不再申请任何通配权限。
+These providers can observe the requested address or tweet ID, the request time and the browser's network address in their own logs. Choosing a different card tab does not stop the card's other data requests. Disable the extension on a site to stop its activity there. Update checks can be disabled independently in settings and are cached for six hours.
 
-## 权限清单（可自行核对 manifest.json）
+上述提供方可能在自己的日志中看到查询的 CA / 推文 ID、时间和网络地址。切换卡片标签不会停止其它部分取数；若要停止某站点上的扩展活动，请停用该站点访问。更新检查可在设置中单独关闭，缓存六小时。
 
-```
-permissions:       storage
-host_permissions:  https://app.debot.ai/*, https://debot.ai/*, https://api.fxtwitter.com/*, https://api.dexscreener.com/*, https://api.github.com/*
-content_scripts:   https://fomo.family/*
-```
+## Browser storage / 浏览器存储
 
-## 反馈
+- `chrome.storage.sync`: language, automatic opening, hover preview and update-check preferences. Chrome may synchronize these settings through its own browser account feature. / 语言、自动弹出、悬停及更新偏好；浏览器可能通过自己的账号同步这些设置。
+- `chrome.storage.local`: card/magnifier position, size, appearance and release-check cache. / 卡片及放大镜的位置、尺寸、外观与版本检查缓存。
+- `chrome.storage.session` and service-worker memory: bounded caches of public narrative, tweet and pool data. Fomo snapshots are held in service-worker memory for up to 60 seconds. / 叙事、推文、池子数据缓存；Fomo 快照只在后台内存短暂保留，最多 60 秒。
 
-任何隐私相关问题请开 GitHub Issue。
+The extension does not write a browsing-history log or upload these settings/snapshots to the developer. Data cached by the browser is removed when its extension storage is cleared or the extension is uninstalled; synchronized settings remain subject to the browser's own sync behavior.
+
+扩展不保存浏览历史日志，也不把设置或 Fomo 快照上传给开发者。清理扩展存储或卸载会清除浏览器中的扩展数据；已同步设置受浏览器自身同步机制管理。
+
+## Permissions / 权限
+
+`storage` stores preferences and short-lived caches. `scripting` reads token identity from the supported sites' page components and reconnects this extension after reload. Host permissions are limited to the exact supported sites and fixed services listed above. There is no `<all_urls>`, no optional wildcard host permission and no custom analysis-source request path.
+
+`storage` 用于设置与短期缓存；`scripting` 用于读取支持站点的代币身份，以及扩展重新加载后重连自己的卡片。站点权限限定于上述域名，没有全站访问、可选通配域名或自定义分析源请求通道。
+
+For questions, open a [GitHub issue](https://github.com/mickeyhogen/fomo-helper/issues). Please do not post cookies, login tokens or private keys.
