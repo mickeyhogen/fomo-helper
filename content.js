@@ -367,6 +367,7 @@
   let card = null;         // 卡片根节点
   let launcher = null;     // 圆钮（v0.9.6 可拖动）
   let launcherPos = null;  // {left, top} —— 拖过就记住
+  let launcherAnchor = null; // Last visible close button; automatic placement is never saved as a drag.
   let launcherWasDragged = false;
   let lastClosedToken = null;
   let storyAttempt = 0, storyRetryTimer = null;
@@ -1629,20 +1630,23 @@ details.tweets > summary { color: #9aa0aa; }
     if (state.open) { clearReveal(); showCardNow(); rescanNow(true); }
   }
 
-  /** 圆钮位置（拖过才有）；钳在视口内。 */
+  /** 手动位置优先；未拖过时留在刚关闭的卡片处，完整钳在视口内。 */
   function applyLauncherPos() {
     if (!launcher) return;
     const width = launcher.offsetWidth || 116, height = launcher.offsetHeight || 40;
     const maxL = Math.max(8, window.innerWidth - width - 8);
     const maxT = Math.max(8, window.innerHeight - height - 8);
-    if (!launcherPos) {
+    const pos = launcherPos || (launcherAnchor && {
+      left: launcherAnchor.right - width, top: launcherAnchor.centerY - height / 2,
+    });
+    if (!pos) {
       launcher.style.left = ''; launcher.style.top = Math.min(maxT, Math.max(8, Math.round(innerHeight * .44))) + 'px';
       launcher.style.right = '12px'; launcher.style.bottom = 'auto';
     } else {
-      launcherPos.left = Math.min(Math.max(8, launcherPos.left), maxL);
-      launcherPos.top = Math.min(Math.max(8, launcherPos.top), maxT);
-      launcher.style.left = launcherPos.left + 'px';
-      launcher.style.top = launcherPos.top + 'px';
+      pos.left = Math.min(Math.max(8, pos.left), maxL);
+      pos.top = Math.min(Math.max(8, pos.top), maxT);
+      launcher.style.left = pos.left + 'px';
+      launcher.style.top = pos.top + 'px';
       launcher.style.right = 'auto';
       launcher.style.bottom = 'auto';
     }
@@ -1723,6 +1727,12 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function closeCard() {
+    // Capture before hiding: the first reopen entry stays under the close gesture.
+    // Repeated closes follow the card until the owner explicitly drags the entry.
+    if (card && !card.hidden && !launcherPos && els) {
+      const r = els.closeBtn.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) launcherAnchor = { right: r.right, centerY: r.top + r.height / 2 };
+    }
     if (state.ca) lastClosedToken = { ca: state.srcAddr || state.ca, chain: state.chain };
     cancelStoryRetry();
     cancelHoverDwell();

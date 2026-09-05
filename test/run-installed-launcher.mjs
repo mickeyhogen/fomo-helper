@@ -18,6 +18,7 @@ const OTHER='0x020bfc650a365f8bb26819deaabf3e21291018b4';
 const POOL='0x1d767e12f99d8c7ac792749209868a1fafec6e1599b5cb9f4582bf5525793598';
 const checks=[],errors=[];
 const check=(name,ok,detail)=>{checks.push({name,ok:!!ok,...(!ok?{detail}:{})});console.log((ok?'PASS ':'FAIL ')+name)};
+const contains=(rect,point)=>point.x>=rect.x&&point.x<=rect.x+rect.w&&point.y>=rect.y&&point.y<=rect.y+rect.h;
 const fomo=fs.readFileSync(DIR+'/mock-fomo-mirror.html','utf8');
 const server=https.createServer({key:fs.readFileSync(temp+'/key'),cert:fs.readFileSync(temp+'/cert')},(req,res)=>{
   const u=new URL(req.url,'https://'+req.headers.host);
@@ -49,14 +50,16 @@ try{
     await p.goto(route,{waitUntil:'domcontentloaded'});
     check(site+' default current-token card',!!await until(async()=>(await lensSnapshot(p))?.card));
     const marker=await p.evaluate(()=>window.__launcherDocumentMarker=Math.random());
-    await lensClick(p,'.btn.x');await sleep(160);
+    const cardBefore=(await lensSnapshot(p)).cardRect,closePoint=await lensPoint(p,'.btn.x');
+    await p.mouse.click(closePoint.x,closePoint.y);await sleep(260);
     let s=await lensSnapshot(p);
     check(site+' close leaves visible clickable launcher',!s.card&&s.launcher&&s.inViewport&&s.hit,s);
+    check(site+' first close stays at the card and under the close gesture',contains(s.rect,closePoint)&&contains(cardBefore,{x:s.rect.x+s.rect.w/2,y:s.rect.y+s.rect.h/2}),{cardBefore,closePoint,after:s});
     check(site+' launcher identifies itself without hovering',s.label==='Fomo Lens',s);
     const point=await lensPoint(p,'.launcher');await p.mouse.move(point.x,point.y);await sleep(250);
     s=await lensSnapshot(p);check(site+' hover explains reopen and drag',s.tooltip==='visible'&&s.hint.includes('拖动'),s);
     await p.screenshot({path:OUT+'/'+site+'-closed.png'});
-    await lensClick(p,'.launcher');
+    await p.mouse.click(closePoint.x,closePoint.y);
     check(site+' actual click restores card without refresh',!!await until(async()=>{const s=await lensSnapshot(p);return s?.card&&!s.launcher;})&&await p.evaluate(x=>window.__launcherDocumentMarker===x,marker));
     check(site+' reopen remains on the current token',p.url()===route&&(await lensSnapshot(p)).preview===false);
     for(let i=0;i<3;i++){await lensClick(p,'.btn.x');await sleep(100);await lensClick(p,'.launcher');check(site+' repeated reopen '+i,!!await until(async()=>(await lensSnapshot(p))?.card));}
@@ -67,10 +70,32 @@ try{
     check(site+' outside click leaves a recoverable entry',!s.card&&s.launcher&&s.hit,s);
     await lensClick(p,'.launcher');await until(async()=>(await lensSnapshot(p))?.card);
   }
+  check('automatic close placement is not saved as a manual preference',await worker.evaluate(async()=>{const s=await chrome.storage.local.get(null);return ['launcherPos','launcherPos@gmgn','launcherPos@xxyy'].every(k=>!s[k]);}));
+  await lensClick(p,'.btn.x');await sleep(260);
+  await p.setViewport({width:390,height:740});await sleep(260);
+  let autoNarrow=await lensSnapshot(p);
+  check('automatic entry stays visible when the window becomes narrow',autoNarrow.launcher&&autoNarrow.inViewport&&autoNarrow.hit,autoNarrow);
+  await p.setViewport({width:1360,height:900});await sleep(150);
+  await lensClick(p,'.launcher');await until(async()=>(await lensSnapshot(p))?.card);
+  // Move the card, not the entry. The next close must follow the new card location.
+  const header=await lensEval(p,'const r=this.querySelector(".hdr").getBoundingClientRect();return {x:r.left+35,y:r.top+r.height/2};');
+  await p.mouse.move(header.x,header.y);await p.mouse.down();await p.mouse.move(90,130,{steps:8});await p.mouse.up();await sleep(150);
+  const movedCard=(await lensSnapshot(p)).cardRect,movedClose=await lensPoint(p,'.btn.x');
+  await lensClick(p,'.btn.x');await sleep(260);
+  let moved=(await lensSnapshot(p));
+  check('closing a moved card keeps the entry at its new location',contains(moved.rect,movedClose)&&contains(movedCard,{x:moved.rect.x+moved.rect.w/2,y:moved.rect.y+moved.rect.h/2}),{movedCard,movedClose,after:moved});
+  await p.mouse.click(movedClose.x,movedClose.y);await until(async()=>(await lensSnapshot(p))?.card);
   // Drag, then resize: the whole expanded-width launcher must remain visible.
   await lensClick(p,'.btn.x');await sleep(100);
   let pt=await lensPoint(p,'.launcher');await p.mouse.move(pt.x,pt.y);await p.mouse.down();await p.mouse.move(1340,880,{steps:8});await p.mouse.up();await sleep(100);
   check('drag does not accidentally reopen',!(await lensSnapshot(p)).card);
+  const dragged=(await lensSnapshot(p)).rect;
+  await lensClick(p,'.launcher');await until(async()=>(await lensSnapshot(p))?.card);
+  await lensClick(p,'.btn.x');await sleep(260);
+  check('explicitly dragged entry keeps its chosen position on the next close',JSON.stringify((await lensSnapshot(p)).rect)===JSON.stringify(dragged),await lensSnapshot(p));
+  await p.reload({waitUntil:'domcontentloaded'});await until(async()=>(await lensSnapshot(p))?.card);
+  await lensClick(p,'.btn.x');await sleep(260);
+  check('explicitly dragged entry position survives page reload',JSON.stringify((await lensSnapshot(p)).rect)===JSON.stringify(dragged),await lensSnapshot(p));
   await p.setViewport({width:390,height:740});await sleep(200);
   let s=await lensSnapshot(p);check('narrow viewport keeps complete launcher clickable',s.launcher&&s.inViewport&&s.hit,s);
   await p.screenshot({path:OUT+'/narrow-closed.png'});

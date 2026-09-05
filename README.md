@@ -4,7 +4,7 @@
 
 One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, holders and Fomo holding share. XXYY supports both its old and new layouts, including `www.xxyy.io` and `pro.xxyy.io`.
 
-[Download v0.9.22](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.22/fomo-helper-v0.9.22.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
+[Download v0.9.23](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.23/fomo-helper-v0.9.23.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
 
 ## New since v0.9.8
 
@@ -12,7 +12,7 @@ One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, ho
 - **The same Fomo data everywhere.** Thesis, Holders and holding share come from Fomo. Sign in to Fomo in the same browser profile. If the extension cannot read the data, it provides the corresponding Fomo page and a retry action.
 - **Fomo holding share at a glance.** The card shows the value of loaded Fomo holdings divided by market cap, with coverage counts. Incomplete coverage is marked `≥`; unavailable data is never presented as zero.
 - **Reliable current-token loading.** XXYY pool URLs resolve to the actual contract, including Robinhood V4 pools. Mixed-case EVM addresses now retrieve the same narrative as lowercase hover addresses. Solana addresses retain their case.
-- **Recovery and reopening.** Transient narrative failures retry once. Manual Retry preserves the loaded Fomo panels. Closing leaves a labeled Fomo Lens button on the right; click it to reopen the current token without refreshing. Extension reloads reconnect existing supported pages.
+- **Recovery and reopening.** Transient narrative failures retry once. Manual Retry preserves the loaded Fomo panels. Closing leaves a labeled Fomo Lens button near the former close button, or at your manually chosen position; click it to reopen the current token without refreshing. Extension reloads reconnect existing supported pages.
 - **Chinese and English.** Card and settings labels, loading states and login instructions are bilingual. Original theses keep their source language; optional local translation depends on browser support.
 
 ## In the card

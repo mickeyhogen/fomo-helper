@@ -4,15 +4,15 @@
 
 在 **Fomo、GMGN 和 XXYY** 用同一张卡查看代币叙事、Fomo 观点、持有人和持仓占比。XXYY 的 `www.xxyy.io`、`pro.xxyy.io` 及站内新旧两版界面均支持。
 
-[下载 v0.9.22](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.22/fomo-helper-v0.9.22.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
+[下载 v0.9.23](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.23/fomo-helper-v0.9.23.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
 
 ## 相比 v0.9.8 更新了什么
 
-- **三站合一**：打开代币页默认出卡，悬停代币行可预览；XXYY 收藏、钱包监控和新旧界面都能识别。
+- **支持 FOMO GMGN XXYY**：打开代币页默认出卡，悬停代币行可预览；XXYY 收藏、钱包监控和新旧界面都能识别。
 - **Fomo 数据同步可读**：Thesis、Holders 和持仓占比统一来自 Fomo。先在同一浏览器配置中登录 Fomo；读取失败时给出对应代币的 Fomo 入口与重试提示。
 - **新增 Fomo 持仓横栏**：已读取持仓金额合计 ÷ 页面市值，同时显示已读人数 / 总人数。覆盖不完整标 `≥`，读不到不会伪造为零。
 - **修复当前代币读取**：XXYY 池子地址先解析为实际 CA，支持 Robinhood V4 池。EVM 地址大小写统一后，当前页与悬停能读到同一叙事；Solana 地址保留大小写。
-- **断线恢复与关闭后重开**：短暂失败自动补试一次；手动重试叙事时保留已读到的 Fomo 内容。关闭后右侧保留带名称的 Fomo Lens 小浮钮，点击恢复当前代币，无需刷新；重新加载扩展时自动连接已打开的页面。
+- **断线恢复与关闭后重开**：短暂失败自动补试一次；手动重试叙事时保留已读到的 Fomo 内容。关闭后在原关闭按钮附近保留带名称的 Fomo Lens 小浮钮，手动拖动后记住你选的位置。点击恢复当前代币，无需刷新；重新加载扩展时自动连接已打开的页面。
 - **中英文兼容**：卡片、设置、加载和登录提示均有中英版本。观点保留原文；本地翻译取决于浏览器支持。
 
 ## 卡片内容

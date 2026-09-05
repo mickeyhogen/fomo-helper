@@ -2492,7 +2492,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.22', mf.version === '0.9.22', mf.version),
+    chk('版本号为 0.9.23', mf.version === '0.9.23', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions = storage,scripting',

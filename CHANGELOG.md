@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.9.23 — 2026-09-06
+
+### English
+
+- When the card closes, the Fomo Lens button stays beside its former close button, so it can be reopened in the same place. Moving the card also moves this default entry.
+- Dragging the entry still saves your chosen location. Automatic placement does not overwrite that preference, and the entry remains inside the viewport.
+- **XXYY compatibility: the entry stays at the card's close position in both classic and new layouts and reopens the current token without refreshing.**
+- **GMGN compatibility: closing the card leaves the entry at the same position, while manually dragged entry positions are retained.**
+
+Upgrade: overwrite the extension folder and reload the extension. Existing settings are retained.
+
+### 中文
+
+- 关闭卡片后，Fomo Lens 小浮钮留在原关闭按钮附近，可以原地重新打开；拖动卡片后，默认入口也跟着卡片。
+- 手动拖过浮钮后，继续记住你选的位置。自动定位不会覆盖手动位置，缩小窗口后浮钮仍留在屏幕内。
+- **XXYY 兼容更新：新旧界面都在卡片原关闭位置保留入口，点击恢复当前代币，无需刷新。**
+- **GMGN 兼容更新：关闭卡片后原地保留入口，手动拖过浮钮后继续沿用你选的位置。**
+
+升级：覆盖扩展目录后，在扩展管理页重新加载；已有设置保留。
+
 ## v0.9.22 — 2026-09-05
 
 ### English
