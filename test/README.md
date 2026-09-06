@@ -23,6 +23,7 @@ node test/run-installed-gmgn-smoke.mjs
 node test/run-installed-loading-regression.mjs
 node test/run-installed-xxyy-layouts.mjs
 node test/run-installed-unified-fomo.mjs
+node test/run-installed-thesis.mjs
 node test/run-installed-public-upgrade.mjs
 node test/run-site-test.mjs
 node test/run-render-test.mjs
@@ -54,3 +55,5 @@ card alone is insufficient: narrative and Fomo fields must contain actual conten
 ### Reopen entry acceptance
 
 Run `FOMO_EXTENSION_DIR=<unpacked-release>/fomo-helper FOMO_TEST_OUTPUT=<output-dir> node test/run-installed-launcher.mjs`. This uses a real MV3 installation and trusted mouse/keyboard/touch input. It covers closing by ×, Escape and outside click; a labeled, visible and hit-tested reopen entry; repeated reopening without refreshing; current-CA routing in both XXYY layouts and manual mode; dragging, viewport resize, language and reduced-motion settings. A DOM `hidden` flag or programmatic `.click()` alone is not acceptance. Real-site checks supplement these deterministic fixtures.
+
+Thesis acceptance mounts Holders and comments mutually exclusively, as Fomo does. It covers native Fomo, GMGN and XXYY, responsive missing columns, Closed authors, newer badges, failed reads, login, late token responses and cold pages taking longer than 15 seconds. Set `FOMO_THESIS_BASELINE=1` with the v0.9.23 extension to reproduce the original missing-newest bug.

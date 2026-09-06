@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.24 — 2026-09-06
+
+### English
+
+- Newest ≥2 likes reads comments independently of the Holders table on Fomo, GMGN and XXYY. Existing Fomo pages retain their selected tab, filters and scroll position.
+- By likes can show loaded comments when the responsive holder table omits theses, with an explicit coverage note.
+- Fomo pauses comments in hidden tabs; offer an explicit foreground-read action, then close its temporary tab and return. Sorting alone never activates another tab.
+- Parse Closed authors and older/newer badges; distinguish loading, login, unavailable and genuinely empty comments. Retry preserves holdings and narrative.
+
+### 中文
+
+- 三站的「最新 ≥2赞」独立读取评论，不再被 Holders 表是否显示卡住；已有 Fomo 页的标签、筛选和滚动位置保持。
+- 窄窗口下持仓表未提供观点时，「按赞」可显示已读评论，并注明排序范围。
+- Fomo 会暂停后台标签页的评论；改为明确的前台读取按钮，读完关闭临时页并返回。单纯切换排序不会切走当前页。
+- 补齐已平仓作者及 older/newer 标记的解析；读取中、需要登录、读取失败与没有达标评论分别提示，重试保留持仓和叙事。
+
 ## v0.9.23 — 2026-09-06
 
 ### English

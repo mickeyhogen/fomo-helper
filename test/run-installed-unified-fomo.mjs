@@ -198,7 +198,7 @@ try{
   check('pending existing page cannot consume the new page login-hydration grace',!!hydrated&&!hydrated.holders.includes(COPY.login),hydrated?.holders);
  }
  await page.evaluate(url=>history.pushState({},'',url),tokenPath(UNAVAILABLE));
- actual=await until(async()=>{const s=await snapshot(page);return s.holders.includes(COPY.unavailable)?s:null},19000);
+ actual=await until(async()=>{const s=await snapshot(page);return s.holders.includes(COPY.unavailable)?s:null},33000);
  check('unavailable Fomo prompts opening Fomo and checking login, without false zero',!!actual&&!actual.share&&actual.holders.includes(COPY.unavailable),actual);
  const closed=await until(async()=>{const ps=await browser.pages();return ps.filter(p=>p!==reference&&p.url().startsWith('https://fomo.family/')).length===0},4000);
  check('temporary Fomo tabs close while existing Fomo page is preserved',!!closed&&!reference.isClosed());

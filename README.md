@@ -19,7 +19,7 @@ One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, ho
 
 **Meta** shows the DeBot narrative, rating rationale and source tweets. Origin and rationale are open by default; additional sections can be expanded. Secondary-pool chips come from DexScreener.
 
-**Thesis** lists the highest-liked holder theses, up to 30, with position and PnL. The total reported by Fomo and the truncation notice are preserved. A newest-first view is available when the Fomo feed is readable.
+**Thesis** lists the highest-liked holder theses, up to 30, with position and PnL. The total reported by Fomo and the truncation notice are preserved. Selecting **Newest ≥2 likes** reads the token’s comments independently, including authors who closed their positions. If the holder table does not provide theses, **By likes** sorts the loaded comments and labels that coverage. Loading, login, retry and an empty result are shown separately.
 
 **Holders** shows the six largest loaded positions, their PnL and holding duration; hover a row for average entry. The share bar uses **all loaded holder rows**, not just those six. It is not a complete on-chain ownership statistic.
 
@@ -40,7 +40,7 @@ The settings panel controls language, automatic opening, hover preview, brightne
 
 ## How Fomo data is read
 
-On Fomo, the extension reads the rendered token page. On GMGN or XXYY, it first looks for an already open matching Fomo page. If none is readable, it opens a temporary inactive Fomo token page using your existing browser login and closes that page after reading. It does not click, scroll or navigate an existing Fomo page.
+On Fomo, the extension first reads the rendered token page. Comment views on all three sites, and holder views on GMGN or XXYY, can also read an already open matching Fomo page. If none is readable, it opens a temporary inactive Fomo token page using your existing browser login and closes that page after reading. Fomo pauses comments in hidden tabs. If no readable comments are available, the card offers **Read in Fomo, then return**. Only clicking this action opens a temporary foreground tab; it closes after reading and returns to the opener. It does not click, scroll or navigate an existing Fomo page.
 
 The extension does **not** extract cookies, login tokens, private keys or seed phrases. Temporary Fomo pages do make the normal network requests of that website. Public narrative, tweet and pool queries send the relevant contract or tweet ID to their providers. There is no developer-operated collection server or telemetry. See [Privacy](PRIVACY.md) for exact access and storage details.
 

@@ -204,7 +204,10 @@
       friendsOn: '页面开着 Friends only 筛选——关闭它才能显示全部数据', friendsMaybe: '（若开着 Friends only 筛选，需关闭才有全量数据）',
       bottomTab: '把 fomo 下方面板切到「Holders」标签才有数据（现在停在别的标签）',
       translated: '页面被浏览器翻译了（Chrome 网页翻译会改掉表格文字）——点地址栏翻译图标选「显示原文」，再刷新', diag: '诊断', diagTitle: '生成一段排查信息并复制，发给作者即可', diagCopied: '诊断信息已复制', diagShown: '诊断信息见下方',
-      feedNoLikes: '评论流里暂时没有 ≥2 赞的发言', feedMissing: '最新档读的是 fomo 自家的 Thesis 评论流——把它打开一次让它渲染出来，再回来看',
+      feedNoLikes: '已读到的评论里暂时没有 ≥2 赞的发言', feedMissing: '暂时读不到这只币的评论，请重试',
+      feedNeedsPage: 'Fomo 评论需要在前台加载一次，读取完成后自动返回。', feedReadAction: '打开 Fomo 读取，完成后返回',
+      feedLoading: '正在读取这只币的评论…', feedEmpty: 'Fomo 暂时没有显示这只币的评论',
+      feedLikes: '持仓表未提供观点，以下按已读到的评论赞数排序', feedRetry: '重试读取评论',
       capNewest: '只显示最新的前 ', capLikes: '只显示点赞最高的前 ', capTail: ' 条（共 ', capEnd: ' 条）',
       cost: '成本 ', held: '持有 ', more: ' 展开', less: ' 收起',
       tweets: '叙事来源推文', tweetsN: '（', tweetsNEnd: ' 条）', loading: '读取中…', openTweet: '打开推文 ↗', moreTweets: '更多来源推文（',
@@ -247,7 +250,10 @@
       friendsOn: '“Friends only” is on — turn it off to see everyone', friendsMaybe: ' (if “Friends only” is on, turn it off for the full list)',
       bottomTab: 'Switch fomo’s bottom panel to the “Holders” tab (it’s on another tab now)',
       translated: 'This page is being translated by the browser, which rewrites the table text — choose “Show original” in the address-bar translate icon, then refresh', diag: 'Diagnose', diagTitle: 'Build a short report and copy it — paste it to the author', diagCopied: 'Diagnostic copied', diagShown: 'Diagnostic shown below',
-      feedNoLikes: 'No thesis with ≥2 likes in the feed yet', feedMissing: 'Newest reads fomo’s own Thesis feed — open that tab once so it renders, then come back',
+      feedNoLikes: 'No loaded comment has ≥2 likes yet', feedMissing: 'Comments for this token could not be read. Please retry.',
+      feedNeedsPage: 'Fomo needs a foreground page to load comments. You will return when reading finishes.', feedReadAction: 'Read in Fomo, then return',
+      feedLoading: 'Reading comments for this token…', feedEmpty: 'Fomo is not showing comments for this token yet',
+      feedLikes: 'No thesis column is available; sorting the loaded comments by likes', feedRetry: 'Retry comments',
       capNewest: 'Showing the newest ', capLikes: 'Showing the top ', capTail: ' (of ', capEnd: ')',
       cost: 'cost ', held: 'held ', more: ' more', less: ' less',
       tweets: 'Source tweets', tweetsN: ' (', tweetsNEnd: ')', loading: 'Loading…', openTweet: 'Open tweet ↗', moreTweets: 'More source tweets (',
@@ -403,6 +409,7 @@
     analysis: blank(),   // 自定义分析源判断
     holders: blank(),    // 从页面 DOM 抓的持仓表
     thesis: blank(),     // 从页面 Holders 表抓的 thesis
+    thesisFeed: { status: 'idle', data: [] }, // Independent of the mutually exclusive Holders tab.
     scrapeFp: { holders: '', thesis: '' },  // 抓取指纹：没变就不重渲染
     pairs: blank(),      // DexScreener 池子交易对（头部 chips）
     tweets: blank(),     // 来源推文
@@ -704,6 +711,37 @@
   // v0.9.14：xxyy 自己没有 Thesis/Holders 表；后台临时打开同币 fomo 页，复用用户现有登录态读取 DOM。
   const requestFomoTokenData = (ca, chain, force, cb) =>
     sendMsg({ type: 'fomo-token-data', ca, chain: chain || '', force: !!force }, cb);
+
+  function thesisFeedRows() {
+    return state.thesisFeed.status === 'ready' ? state.thesisFeed.data
+      : (Array.isArray(state.thesis.feed) ? state.thesis.feed : []);
+  }
+
+  // Only request comments when the owner opens this view. A separate snapshot keeps
+  // loading/errors from clearing positions, and never switches the owner's Fomo tab.
+  function ensureThesisFeed(force = false, activeRead = false) {
+    if (disposed || !state.open || !state.ca || state.resolving) return;
+    // Do not open two cold copies of the same Fomo page while the holder request
+    // is still loading; Chrome can serialize those navigations behind one another.
+    if (SITE.fomoMirror && state.thesis.status === 'scanning') {
+      state.thesisFeed = { status: 'waiting', data: [], activeRead };
+      renderThesis();
+      return;
+    }
+    if (!force && (state.thesisFeed.status !== 'idle' || thesisFeedRows().length)) return;
+    if (state.thesisFeed.status === 'loading') return;
+    const seq = state.seq;
+    state.thesisFeed = { status: 'loading', data: [] };
+    renderThesis();
+    sendMsg({ type: 'fomo-token-data', ca: state.ca, chain: state.chain || '', panel: 'feed', force, activeRead }, (resp) => {
+      if (disposed || seq !== state.seq) return;
+      const fomoUrl = safeFomoPayloadUrl(resp && (resp.fomoUrl || resp.payload?.fomoUrl), true);
+      state.thesisFeed = resp && resp.ok && Array.isArray(resp.payload?.feed)
+        ? { status: 'ready', data: resp.payload.feed.slice(0, 60).map(normalizeMirrorThesis).filter(Boolean), fomoUrl }
+        : { status: resp?.kind === 'auth_required' ? 'auth_required' : resp?.kind === 'visibility_required' ? 'needs_page' : 'error', data: [], fomoUrl };
+      renderThesis();
+    });
+  }
 
   // ---------- 样式 ----------
   const CSS = `
@@ -1834,6 +1872,8 @@ details.tweets > summary { color: #9aa0aa; }
 
   function applyFomoMirrorResponse(seq, resp) {
     if (seq !== state.seq) return;
+    const queuedFeed = state.thesisFeed.status === 'waiting';
+    const queuedActiveRead = state.thesisFeed.activeRead === true;
     const fomoUrl = safeFomoPayloadUrl(resp && (resp.fomoUrl || (resp.payload && resp.payload.fomoUrl)), true);
     if (resp && resp.ok && resp.payload && typeof resp.payload === 'object') {
       const holders = (Array.isArray(resp.payload.holders) ? resp.payload.holders : [])
@@ -1857,8 +1897,11 @@ details.tweets > summary { color: #9aa0aa; }
       state.holders = { status: kind, data: null, error: null, source: 'fomo-mirror', fomoUrl };
       state.thesis = { status: kind, data: null, error: null, source: 'fomo-mirror', fomoUrl };
     }
+    if (queuedFeed) state.thesisFeed = resp?.kind === 'auth_required'
+      ? { status: 'auth_required', data: [], fomoUrl } : { status: 'idle', data: [] };
     renderKol();
     renderThesis();
+    if (queuedFeed && state.thesisFeed.status === 'idle') ensureThesisFeed(false, queuedActiveRead);
   }
 
   /**
@@ -1890,6 +1933,7 @@ details.tweets > summary { color: #9aa0aa; }
     state.analysis = { status: analysisOn ? 'loading' : 'disabled', data: null, error: null };
     state.holders = { status: 'scanning', data: null, error: null };
     state.thesis = { status: 'scanning', data: null, error: null };
+    state.thesisFeed = { status: 'idle', data: [] };
     state.scrapeFp = { holders: '', thesis: '' };   // 换币必重画，指纹清零
     state.pairs = { status: 'loading', data: null, error: null };
     state.tweets = { status: 'idle', data: null, error: null };
@@ -2052,6 +2096,7 @@ details.tweets > summary { color: #9aa0aa; }
       const feedMissing = key === 'views' && state.thesisSort === 'time'
         && !(st && Array.isArray(st.feed) && st.feed.length);
       if (!st || st.status !== 'ready' || feedMissing) rescanNow();
+      if (key === 'views' && (state.thesisSort === 'time' || !state.thesis.data?.length)) ensureThesisFeed();
     }
   }
 
@@ -3086,7 +3131,7 @@ details.tweets > summary { color: #9aa0aa; }
     raw = raw.trim();
 
     // 空、或剥掉点赞数后只剩数字 → 这位持有人没写 thesis
-    if (!raw || /^[\d,.]+$/.test(raw)) return null;
+    if (!raw || /^[\d,.]+$/.test(raw) || /^[—–-]$/.test(raw)) return null;
 
     // 作者 = 持有人名字（复用 KOL 的交易者列解析：砍 Team / "Nd Nh avg. hold" 尾巴）
     const flat = oneLine(cleanText(row));
@@ -3127,8 +3172,9 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   const AGE_TOKEN = '(?:\\d+\\s*' + DUR_UNIT + '(?:\\s*(?:前|ago))?|' + alt(L10N.justNow, true) + ')';
-  const COMMENT_HEAD_RE = new RegExp('^(@?[A-Za-z0-9_.\\-]{2,25})\\s+' + alt(L10N.thesis) + '\\s+(' + AGE_TOKEN + ')(?![A-Za-z])');
-  const COMMENT_HEAD_G = new RegExp('(?:^|\\s)@?[A-Za-z0-9_.\\-]{2,25}\\s+' + alt(L10N.thesis) + '\\s+' + AGE_TOKEN + '(?![A-Za-z])', 'g');
+  const COMMENT_BADGE = '(?:Closed\\s+)?'; // Live feed also includes authors who closed their position.
+  const COMMENT_HEAD_RE = new RegExp('^(@?[A-Za-z0-9_.\\-]{2,32})\\s+' + alt(L10N.thesis) + '\\s+' + COMMENT_BADGE + '(' + AGE_TOKEN + ')(?![A-Za-z])');
+  const COMMENT_HEAD_G = new RegExp('(?:^|\\s)@?[A-Za-z0-9_.\\-]{2,32}\\s+' + alt(L10N.thesis) + '\\s+' + COMMENT_BADGE + AGE_TOKEN + '(?![A-Za-z])', 'g');
 
   /**
    * fomo 自家 Thesis 评论流（主人开过那个 tab 才渲染进 DOM）：一条评论 =
@@ -3171,6 +3217,7 @@ details.tweets > summary { color: #9aa0aa; }
       if (!raw || raw.length > 300 || !COL_THESIS_LOOSE.test(raw)) continue;   // 预筛：textContent 拼死，无词界版
       const head = oneLine(cleanText(el));
       if (!COMMENT_HEAD_RE.test(head)) continue;
+      if (!visibleElement(el)) continue;
       if (inLeftPanel(el)) continue;   // 左栏全局流：不是当前币的评论
       let innermost = true;
       for (const c of el.children) {
@@ -3198,13 +3245,13 @@ details.tweets > summary { color: #9aa0aa; }
       if (hm) { positionUsd = hm[1]; rest = rest.slice(hm[0].length); }
       let pnl = '';
       let pnlPos = null;
-      const pm = /^\(\s*([▲▼+\-−])\s*([\d,.]+)\s*%\s*\)\s*/.exec(rest);
+      const pm = /^(?:\(\s*)?([▲▼+\-−])\s*([\d,.]+)\s*%\s*(?:\)\s*)?/.exec(rest);
       if (pm) {
         pnlPos = (pm[1] === '▲' || pm[1] === '+');
         pnl = (pnlPos ? '▲' : '▼') + pm[2] + '%';
         rest = rest.slice(pm[0].length);
       }
-      rest = rest.replace(/\s+\d+\s+older$/i, '').trim();
+      rest = rest.replace(/\s+[\d,.]+[KMB]?\s+(?:older|newer)$/i, '').trim();
       let likes = 0;
       let text = rest;
       const lm = /\s(\d{1,6})$/.exec(rest);
@@ -3220,8 +3267,11 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   function scrapeThesis(rowElsIn) {
+    // Fomo unmounts Holders when Thesis opens. Read comments before the table guard.
+    let feed = [];
+    try { feed = scrapeThesisFeed(); } catch (_) { feed = []; }
     const rowEls = rowElsIn || collectHolderRows();
-    if (!rowEls.length) return { rows: [], general: false };
+    if (!rowEls.length) return { rows: [], general: false, feed };
     const col = findThesisColumn();
 
     // v0.8：观点页行头要带作者的仓位/盈亏（fomo 同款）。
@@ -3265,8 +3315,6 @@ details.tweets > summary { color: #9aa0aa; }
 
     // 发言时间：评论流在 DOM 里才配得上（作者+正文前缀双门，宁缺毋错）。
     // 评论流只渲染最新一段，按赞榜前排的老 thesis 多半配不上——这是数据侧事实。
-    let feed = [];
-    try { feed = scrapeThesisFeed(); } catch (_) { feed = []; }
     for (const p of out) {
       const key = normKey(p.text).slice(0, 24);
       if (!key) continue;
@@ -3554,6 +3602,7 @@ details.tweets > summary { color: #9aa0aa; }
   let fomoMirrorRouteSince = 0;
   let fomoMirrorAuthKey = '';
   let fomoMirrorAuthStreak = 0;
+  let fomoMirrorHadData = false;
 
   function visibleElement(el) {
     try {
@@ -3608,20 +3657,23 @@ details.tweets > summary { color: #9aa0aa; }
   }
 
   /** 新开的专用后台页若记住了 Swaps/Thesis，切回 Holders；只点同组精确标签。 */
-  function activateFomoHoldersForMirror() {
+  function activateFomoHoldersForMirror(panel = 'holders') {
+    const targetRe = panel === 'feed' ? TAB_THESIS_RE : TAB_HOLDERS_RE;
+    const targetKey = panel === 'feed' ? 'thesis' : 'holders';
     try {
       const buttons = Array.from(document.querySelectorAll('button, [role="tab"]'));
       const holders = buttons.filter((b) => {
         const t = oneLine(b.textContent);
-        return t.length <= 32 && TAB_HOLDERS_RE.test(t) && visibleElement(b);
+        return t.length <= 32 && targetRe.test(t) && visibleElement(b);
       });
       for (const b of holders) {
         let root = b.parentElement;
         for (let up = 0; up < 5 && root && root !== document.body; up++, root = root.parentElement) {
           const group = buttons.filter((x) => root.contains(x)).map((x) => oneLine(x.textContent));
-          const hasPeer = group.some((t) => TAB_SWAPS_RE.test(t)) || group.some((t) => TAB_THESIS_RE.test(t));
+          const hasPeer = group.some((t) => TAB_SWAPS_RE.test(t))
+            || group.some((t) => (panel === 'feed' ? TAB_HOLDERS_RE : TAB_THESIS_RE).test(t));
           if (!hasPeer) continue;
-          if (fomoBottomTab() !== 'holders') b.click();
+          if (fomoBottomTab() !== targetKey) b.click();
           return true;
         }
       }
@@ -3629,8 +3681,8 @@ details.tweets > summary { color: #9aa0aa; }
     return false;
   }
 
-  function prepareFomoMirrorPage() {
-    activateFomoHoldersForMirror();
+  function prepareFomoMirrorPage(panel = 'holders') {
+    activateFomoHoldersForMirror(panel);
     try {
       const holders = Array.from(document.querySelectorAll('h1, h2, h3, div, button')).find((el) => {
         const t = oneLine(el.textContent);
@@ -3692,12 +3744,14 @@ details.tweets > summary { color: #9aa0aa; }
     if (!here || !sameCa(here.ca, ca) || fomoChainKey(here.chain) !== chain) {
       fomoMirrorRouteKey = '';
       fomoMirrorRouteSince = 0;
+      fomoMirrorHadData = false;
       resetFomoMirrorAuth();
       return false;
     }
     if (fomoMirrorRouteKey !== key) {
       fomoMirrorRouteKey = key;
       fomoMirrorRouteSince = Date.now();
+      fomoMirrorHadData = false;
       resetFomoMirrorAuth();
       return false;
     }
@@ -3706,12 +3760,46 @@ details.tweets > summary { color: #9aa0aa; }
 
   function buildFomoMirrorSnapshot(msg) {
     if (SITE.id !== 'fomo') return { status: 'unavailable' };
-    const prepare = () => { if (msg && msg.readOnly !== true) prepareFomoMirrorPage(); };
+    const feedOnly = msg && msg.panel === 'feed';
+    const prepare = () => {
+      if (msg && msg.readOnly !== true) {
+        if (feedOnly && collectHolderRows().length) fomoMirrorHadData = true;
+        // The tab bar mounts before the token context. Switching during that
+        // skeleton frame can strand Fomo's feed on an empty initial query.
+        // A confirmed zero-holder token may still have comments from closed positions.
+        if (feedOnly && !fomoMirrorHadData && fomoBottomTab() !== 'thesis'
+            && !(fomoMirrorHolderCount() === 0 && readMarketCap())) return;
+        prepareFomoMirrorPage(feedOnly ? 'feed' : 'holders');
+      }
+    };
     const ca = msg && typeof msg.ca === 'string' ? msg.ca.trim() : '';
     const chain = fomoChainKey(msg && msg.chain);
     if (!ADDR_RE.test(ca) || !chain) return { status: 'unavailable' };
     const here = parsePath(location.pathname);
     if (!fomoMirrorRouteSettled(ca, chain, here)) {
+      prepare();
+      return { status: 'pending' };
+    }
+
+    if (feedOnly) {
+      if (collectHolderRows().length) fomoMirrorHadData = true;
+      const feed = scrapeThesisFeed();
+      if (feed.length) {
+        resetFomoMirrorAuth();
+        return { status: 'ready', feed: feed.slice(0, 60).map(snapshotThesis) };
+      }
+      if (fomoBottomTab() === 'thesis' && document.readyState === 'complete') {
+        const zeroRe = new RegExp('^' + alt(L10N.thesis, true) + '\\s*\\(\\s*0\\s*\\)$');
+        if (Array.from(document.querySelectorAll('button, [role="tab"]'))
+          .some((el) => visibleElement(el) && zeroRe.test(oneLine(el.textContent)))) {
+          return { status: 'ready', feed: [] };
+        }
+      }
+      if (!fomoMirrorHadData && document.readyState === 'complete' && fomoLoginVisible()) {
+        if (++fomoMirrorAuthStreak >= 2) return { status: 'auth_required' };
+      } else resetFomoMirrorAuth();
+      // Never switch or scroll an existing owner page to satisfy this request.
+      if (msg.readOnly === true) return { status: 'unavailable' };
       prepare();
       return { status: 'pending' };
     }
@@ -4142,13 +4230,44 @@ details.tweets > summary { color: #9aa0aa; }
     const body = els.slotThesis;
     body.textContent = '';
     const st = state.thesis;
-    const rows = (st.status === 'ready' && Array.isArray(st.data)) ? st.data : [];
+    const holderRows = (st.status === 'ready' && Array.isArray(st.data)) ? st.data : [];
+    const feed = thesisFeedRows();
+    const fromFeed = !holderRows.length && feed.length > 0;
+    const rows = fromFeed ? feed.slice().sort((a, b) => b.likes - a.likes) : holderRows;
     const totalCount = st.source === 'fomo-mirror' && Number.isSafeInteger(st.totalCount)
       && st.totalCount >= rows.length ? st.totalCount : rows.length;
     setTabCount('views', totalCount);
 
-    if (renderUnresolvedPool(body) || renderFomoMirrorGate(body, st)) return;
-    if (st.status === 'scanning' || st.status === 'idle') {
+    if (renderUnresolvedPool(body)) return;
+    // Sorting remains reachable even when the Holders table/Thesis column is absent.
+    const sortBtn = (key, label) => h('button', {
+      cls: 'sbtn' + (state.thesisSort === key ? ' on' : ''), text: label, attrs: { type: 'button' },
+      on: { click: () => {
+        state.thesisSort = key;
+        renderThesis();
+        if (key === 'time' || !holderRows.length) ensureThesisFeed();
+      } },
+    });
+    body.appendChild(h('div', { cls: 'sortrow' },
+      [sortBtn('likes', tr('sortLikes')), sortBtn('time', tr('sortTime'))]));
+
+    const feedState = () => {
+      const status = state.thesisFeed.status;
+      const loading = status === 'loading' || status === 'waiting';
+      body.appendChild(h('div', { cls: 'grey', text: loading ? tr('feedLoading')
+        : status === 'needs_page' ? tr('feedNeedsPage')
+        : status === 'auth_required' ? tr('fomoLogin')
+        : status === 'ready' ? tr('feedEmpty') : tr('feedMissing') }));
+      if (!loading) {
+        body.appendChild(h('button', { cls: 'sbtn', text: tr('feedReadAction'), attrs: { type: 'button' },
+          on: { click: () => ensureThesisFeed(true, true) } }));
+        appendFomoLink(body, state.thesisFeed.fomoUrl || st.fomoUrl, tr('fomoOpenAction'));
+      }
+    };
+    if (state.thesisSort === 'time' && !feed.length) { feedState(); return; }
+    if (!rows.length && state.thesisFeed.status !== 'idle') { feedState(); return; }
+    if (!rows.length && renderFomoMirrorGate(body, st)) return;
+    if (!rows.length && (st.status === 'scanning' || st.status === 'idle')) {
       body.appendChild(h('div', { cls: 'grey', text: state.resolving ? tr('resolvingToken') : SITE.fomoMirror ? tr('fomoReading') : tr('readingTable') }));
       return;
     }
@@ -4166,33 +4285,21 @@ details.tweets > summary { color: #9aa0aa; }
       return;
     }
 
-    // v0.8.7 排序切换：按赞（默认）| 最新（只列 ≥2 赞且配到发言时间的，时间新→旧）
-    const sortBtn = (key, label) => h('button', {
-      cls: 'sbtn' + (state.thesisSort === key ? ' on' : ''), text: label, attrs: { type: 'button' },
-      on: { click: () => { if (state.thesisSort !== key) { state.thesisSort = key; renderThesis(); } } },
-    });
-    body.appendChild(h('div', { cls: 'sortrow' },
-      [sortBtn('likes', tr('sortLikes')), sortBtn('time', tr('sortTime'))]));
-
     // 最新档（v0.8.9 重做）：数据源直接换成 fomo 自家评论流——它天生带时间/正文/点赞/持仓，
     // 且"最新"本来就该看它；按赞档继续用 Holders 表全量。评论流只渲染最新一段，没开过
     // 那个 tab 就是空的，占位说明白。
     let shown = rows;
     if (state.thesisSort === 'time') {
-      const feed = Array.isArray(st.feed) ? st.feed : [];
       shown = feed
-        .filter((r) => (r.likes || 0) >= 2 && r.ageMin !== null)
+        .filter((r) => (r.likes || 0) >= 2 && Number.isFinite(r.ageMin) && r.ageMin >= 0)
         .slice()
         .sort((a, b) => a.ageMin - b.ageMin);
       if (!shown.length) {
-        body.appendChild(h('div', { cls: 'grey',
-          text: feed.length
-            ? tr('feedNoLikes')
-            : tr('feedMissing') }));
-        rescanNow();   // 主人多半刚开完评论页切回来，顺手补扫一次
+        body.appendChild(h('div', { cls: 'grey', text: tr('feedNoLikes') }));
         return;
       }
     }
+    if (fromFeed && state.thesisSort === 'likes') body.appendChild(h('div', { cls: 'muted', text: tr('feedLikes') }));
 
     for (const row of shown.slice(0, THESIS_TAB_SHOW)) {
       const item = h('div', { cls: 'row-item' });

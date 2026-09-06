@@ -8,9 +8,9 @@ Fomo Lens 没有开发者自建采集服务器、遥测或扩展账号。它读�
 
 The content script runs on `https://fomo.family/*`, `https://gmgn.ai/*`, `https://pro.xxyy.io/*` and `https://www.xxyy.io/*`.
 
-On Fomo it reads rendered token data. On GMGN and XXYY, a bounded, read-only page probe identifies the hovered token's chain and contract address. For Thesis, Holders and holding share, the extension reads an existing matching Fomo page or opens an inactive temporary token page. Temporary pages use the browser's existing Fomo login, make the normal requests of that website, and are closed after reading. Existing Fomo pages are not clicked, scrolled or navigated by the reader.
+On Fomo it first reads rendered token data; opening a comment view may additionally request a matching Fomo page as described below. On GMGN and XXYY, a bounded, read-only page probe identifies the hovered token's chain and contract address. For Thesis, Holders and holding share, the extension reads an existing matching Fomo page or opens an inactive temporary token page. Temporary pages use the browser's existing Fomo login, make the normal requests of that website, and are closed after reading. Fomo pauses comments in hidden tabs. The explicit **Read in Fomo, then return** action opens a temporary foreground tab, closes it after reading and returns to its opener. Merely changing the sort does not activate another tab. Existing Fomo pages are not clicked, scrolled or navigated by the reader.
 
-脚本只注入上述精确域名。在 Fomo 读取已渲染内容；在 GMGN / XXYY 用有界只读探针识别悬停代币的链和 CA。观点、持有人和持仓占比读取已有的同币 Fomo 页，或打开临时后台代币页。临时页复用浏览器现有登录，正常向 Fomo 请求页面数据，读完关闭；不会点击、滚动或跳转已有 Fomo 页面。因此三站取数不能称为“零网络”。
+脚本只注入上述精确域名。在 Fomo 优先读取已渲染内容，打开评论视图时也可能按下述方式读取同币页面；在 GMGN / XXYY 用有界只读探针识别悬停代币的链和 CA。观点、持有人和持仓占比读取已有的同币 Fomo 页，或打开临时后台代币页。临时页复用浏览器现有登录，正常向 Fomo 请求页面数据，读完关闭；不会点击、滚动或跳转已有 Fomo 页面。Fomo 会暂停后台标签页的评论，只有点击「打开 Fomo 读取，完成后返回」才会打开前台临时页，读完自动关闭并返回；单纯切换排序不会切走当前页。因此三站取数不能称为“零网络”。
 
 The extension does not extract, store or forward login cookies, session tokens, private keys or seed phrases. It does not have cookie or wallet permissions. Login is completed directly on Fomo, never in this extension.
 

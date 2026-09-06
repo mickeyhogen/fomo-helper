@@ -965,11 +965,11 @@ try {
   await pushState(page, `/tokens/robinhood/${CASHCAT_CA}`);
   await sleep(1200);
   s = await snap(page);
-  step('步骤 20 · Holders 表未渲染 → KOL 与 Thesis 都给"滚到可见"灰字，而非报错', [
+  step('步骤 20 · Holders 未渲染 → 持仓提示，观点独立显示已读评论', [
     chk('KOL 段给出可操作灰字', s.kolText.includes('把页面的 Holders 表滚动到可见即可显示持仓'), s.kolText.slice(0, 60)),
-    chk('Thesis 段（同源）也给出"滚到可见"灰字', s.thesisText.includes('把页面的 Holders 表滚动到可见即可显示'), s.thesisText.slice(0, 80)),
+    chk('Thesis 明示按已读评论排序', s.thesisText.includes('按已读到的评论赞数排序'), s.thesisText.slice(0, 80)),
     chk('KOL 抓不到时 0 行', s.kolRows === 0, s.kolRows),
-    chk('Thesis 抓不到时 0 行', s.thesisRows === 0, s.thesisRows),
+    chk('持仓未挂载时仍显示 3 条评论', s.thesisRows === 3, s.thesisRows),
     chk('DeBot 段不受影响', s.debotText.includes('起源') || s.debotText.includes('评级理由'), null),
   ]);
   await page.evaluate(() => { const m = document.querySelector('main'); if (window.__savedHolders && m) m.appendChild(window.__savedHolders); });
@@ -985,9 +985,9 @@ try {
   await pushState(page, `/tokens/robinhood/${PONS_CA}`);
   await sleep(1200);
   s = await snap(page);
-  step('步骤 21 · Holders 表在、但没人写 thesis → "持有人里暂时没有写 thesis 的" 灰字', [
-    chk('Thesis 段给出改写后的灰字', s.thesisText.includes('持有人里暂时没有写 thesis 的'), s.thesisText.slice(0, 60)),
-    chk('抓不到时 0 行', s.thesisRows === 0, s.thesisRows),
+  step('步骤 21 · Holders 没有观点 → 按已读评论排序', [
+    chk('Thesis 段给出改写后的灰字', s.thesisText.includes('按已读到的评论赞数排序'), s.thesisText.slice(0, 60)),
+    chk('表中没有观点时仍显示 3 条评论', s.thesisRows === 3, s.thesisRows),
     chk('KOL 仍照常（同表，持仓不受影响）', s.kolRows === 6, s.kolRows),
   ]);
   await page.evaluate(() => { (window.__savedThesisCells || []).forEach(([c, t]) => { c.textContent = t; }); });
@@ -1012,7 +1012,7 @@ try {
     const auto = await snap(page);
 
     step('步骤 21b · Holders 表晚渲染 → KOL+Thesis 两段自动补上（同表同源，不用点 ↻）', [
-      chk('补上之前两段都是灰字（0 行）', greyed.thesisRows === 0 && greyed.kolRows === 0,
+      chk('持仓未到时评论仍可读', greyed.thesisRows === 3 && greyed.kolRows === 0,
         [greyed.thesisRows, greyed.kolRows]),
       chk('晚到的 Holders 让 Thesis 自动补上（零点击）', auto.thesisRows > 0, auto.thesisRows),
       chk('晚到的 Holders 让 KOL 自动补上（零点击）', auto.kolRows > 0, auto.kolRows),
@@ -1093,7 +1093,7 @@ try {
     const fOff = await snap(page);
     step('步骤 21f · Friends only 开着且抓不到 → 空态明说"关闭它才能显示全部数据"', [
       chk('Holders 空态点名 Friends only', fOn.kolText.includes('Friends only 筛选——关闭它才能显示全部数据'), fOn.kolText.slice(0, 60)),
-      chk('Thesis 空态同样点名', fOn.thesisText.includes('Friends only'), fOn.thesisText.slice(0, 60)),
+      chk('Holders 筛选不遮住已读评论', fOn.thesisRows === 3 && fOn.thesisText.includes('按已读到的评论赞数排序'), fOn.thesisText.slice(0, 60)),
       chk('关掉筛选 + 表回来 → 数据恢复', fOff.kolRows === 6 && fOff.thesisRows === 3, [fOff.kolRows, fOff.thesisRows]),
     ]);
   }
@@ -1120,7 +1120,7 @@ try {
     const back = await snap(page);
     step('步骤 21g · 底部面板停在 Thesis 标签 → 空态提示"切到 Holders"，切回即恢复', [
       chk('Holders 空态点名底部标签', onThesis.kolText.includes('切到「Holders」'), onThesis.kolText.slice(0, 60)),
-      chk('Thesis 空态同样点名', onThesis.thesisText.includes('切到「Holders」'), onThesis.thesisText.slice(0, 60)),
+      chk('Thesis 不要求先切回 Holders', onThesis.thesisRows === 3 && !onThesis.thesisText.includes('切到「Holders」'), onThesis.thesisText.slice(0, 60)),
       chk('不再冒出 Friends only 猜测句', !onThesis.kolText.includes('若开着 Friends only'), onThesis.kolText.slice(0, 80)),
       chk('diag 认出 bottomTab=thesis', diagOnThesis.bottomTab === 'thesis', diagOnThesis.bottomTab),
       chk('diag 认出 friendsOnly=false（真形状开关）', diagOnThesis.friendsOnly === false, diagOnThesis.friendsOnly),
@@ -1213,9 +1213,9 @@ try {
     await sleep(1300);
     const back = await snap(page);
     step('步骤 21j · 页面被浏览器翻译 → 空态点名"显示原文"，diag 标 translated', [
-      chk('翻译后锚点消失、两页为空', tr.kolRows === 0 && tr.thesisRows === 0, [tr.kolRows, tr.thesisRows]),
+      chk('持仓锚点被翻译后，未翻译的评论仍可读', tr.kolRows === 0 && tr.thesisRows === 3, [tr.kolRows, tr.thesisRows]),
       chk('Holders 空态点名浏览器翻译', tr.kolText.includes('被浏览器翻译'), tr.kolText.slice(0, 60)),
-      chk('Thesis 空态同样点名', tr.thesisText.includes('被浏览器翻译'), tr.thesisText.slice(0, 60)),
+      chk('未翻译的评论仍可独立读取', tr.thesisRows === 3, tr.thesisText.slice(0, 60)),
       chk('diag translated=true 且 cjk>0', dTr.translated === true && dTr.cjk > 0, [dTr.translated, dTr.cjk]),
       chk('恢复原文后数据回来', back.kolRows === 6 && back.thesisRows === 3, [back.kolRows, back.thesisRows]),
     ]);
@@ -1270,7 +1270,7 @@ try {
     const d1 = await page.evaluate(() => window.__fomoDebotTestHandle.diag());
     await page.evaluate(() => { for (const [c, v] of window.__thCells) c.textContent = v; });
     step('步骤 21l · 表在但没人写 thesis = 稳定空态 → 滚动不触发重扫', [
-      chk('夹具成立：Holders 有、Thesis 空', stable.kolRows === 6 && stable.thesisRows === 0, [stable.kolRows, stable.thesisRows]),
+      chk('夹具成立：Holders 有、表中没观点、评论可读', stable.kolRows === 6 && stable.thesisRows === 3, [stable.kolRows, stable.thesisRows]),
       chk('滚动后 lastScan 没被刷新为 0s', d1.lastScan !== '0s', d1.lastScan),
     ]);
   }
@@ -2492,7 +2492,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.23', mf.version === '0.9.23', mf.version),
+    chk('版本号为 0.9.24', mf.version === '0.9.24', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions = storage,scripting',

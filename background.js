@@ -741,7 +741,9 @@ async function handleGmgnReactHit(msg, sender) {
 // 向匹配的 content script 请求最小字段快照。只关闭自己创建的临时页；跨币取消旧任务。
 // ---------------------------------------------------------------------------
 
-const FOMO_MIRROR_WAIT_MS = 15000;
+// A cold, inactive Fomo page can need more than 15s before its React panels mount.
+// Keep this below the content script's 35s message deadline, including cleanup.
+const FOMO_MIRROR_WAIT_MS = 28000;
 const FOMO_MIRROR_POLL_MS = 350;
 const FOMO_MIRROR_MESSAGE_TIMEOUT_MS = 2500;
 const FOMO_MIRROR_AUTH_GRACE_MS = 1800;  // Exact auth_required must persist this long; page loading cannot consume the grace.
@@ -755,10 +757,12 @@ const fomoMirrorActive = new Map(); // One cancellable reader per requesting tab
 
 const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function createInactiveTab(url) {
+function createInactiveTab(url, openerTabId = null) {
   return new Promise((resolve, reject) => {
     try {
-      chrome.tabs.create({ url, active: false }, (tab) => {
+      const options = { url, active: Number.isInteger(openerTabId) };
+      if (Number.isInteger(openerTabId)) options.openerTabId = openerTabId;
+      chrome.tabs.create(options, (tab) => {
         const err = chrome.runtime.lastError;
         if (err || !tab || !Number.isInteger(tab.id)) reject(new Error('tab_create_failed'));
         else resolve(tab);
@@ -795,7 +799,7 @@ function closeMirrorTab(tabId) {
 function validFomoMirrorSender(sender) {
   let source;
   try { source = new URL(String((sender && sender.url) || '')); } catch (_) { return false; }
-  return source.protocol === 'https:' && ['gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(source.hostname.toLowerCase())
+  return source.protocol === 'https:' && ['fomo.family', 'gmgn.ai', 'pro.xxyy.io', 'www.xxyy.io'].includes(source.hostname.toLowerCase())
     && !!sender.tab && Number.isInteger(sender.tab.id) && Number(sender.frameId || 0) === 0;
 }
 
@@ -851,7 +855,7 @@ async function readFomoMirror(job, ca, chain, fomoUrl) {
       const next = [];
       for (const ownerTab of pending) {
         if (job.cancelled || Date.now() - started >= 4000) break;
-        const resp = await sendToTab(ownerTab.id, { type: 'fomo-mirror-snapshot', ca, chain, readOnly: true }, 800);
+        const resp = await sendToTab(ownerTab.id, { type: 'fomo-mirror-snapshot', ca, chain, panel: job.panel, readOnly: true }, 800);
         const snap = resp && resp.ok && resp.payload;
         if (snap && snap.status === 'ready') return readyFomoResult(job, snap, fomoUrl);
         if (snap && snap.status === 'pending') next.push(ownerTab);
@@ -860,7 +864,10 @@ async function readFomoMirror(job, ca, chain, fomoUrl) {
       await waitMs(FOMO_MIRROR_POLL_MS);
     }
     if (job.cancelled) return { ok: false, kind: 'superseded', fomoUrl };
-    const tab = await createInactiveTab(fomoUrl);
+    // Fomo pauses comments while hidden. Foreground reading requires the explicit
+    // card action; ordinary sorting can reuse cached or already rendered comments.
+    if (job.panel === 'feed' && !job.activeRead) return { ok: false, kind: 'visibility_required', fomoUrl };
+    const tab = await createInactiveTab(fomoUrl, job.panel === 'feed' ? job.ownerTabId : null);
     job.tabId = tab.id;
     let authObservedSince = null;
     let readyObservedSince = null;
@@ -869,7 +876,7 @@ async function readFomoMirror(job, ca, chain, fomoUrl) {
 
     while (!job.cancelled && Date.now() - started < FOMO_MIRROR_WAIT_MS) {
       const remaining = FOMO_MIRROR_WAIT_MS - (Date.now() - started);
-      const resp = await sendToTab(tab.id, { type: 'fomo-mirror-snapshot', ca, chain },
+      const resp = await sendToTab(tab.id, { type: 'fomo-mirror-snapshot', ca, chain, panel: job.panel },
         Math.min(FOMO_MIRROR_MESSAGE_TIMEOUT_MS, Math.max(1, remaining)));
       if (job.cancelled) return { ok: false, kind: 'superseded', fomoUrl };
       const snap = resp && resp.ok && resp.payload;
@@ -878,7 +885,7 @@ async function readFomoMirror(job, ca, chain, fomoUrl) {
         // Give those fields a short bounded grace instead of caching the first partial frame.
         if (readyObservedSince === null) readyObservedSince = Date.now();
         latestReady = snap;
-        if ((snap.share && Array.isArray(snap.thesis) && snap.thesis.length)
+        if (job.panel === 'feed' || (snap.share && Array.isArray(snap.thesis) && snap.thesis.length)
             || Date.now() - readyObservedSince >= 1800) return readyFomoResult(job, snap, fomoUrl);
       } else { latestReady = null; readyObservedSince = null; }
       if (snap && snap.status === 'auth_required') {
@@ -906,16 +913,29 @@ async function handleFomoTokenData(msg, sender) {
   const chain = msg && typeof msg.chain === 'string' ? msg.chain.trim().toLowerCase() : '';
   const routeChain = FOMO_ROUTE_CHAIN[chain];
   if (!XXYY_ADDR_RE.test(ca) || !routeChain) return { ok: false, kind: 'unavailable' };
-  const key = chain + '|' + cacheKey(ca);  // base58 大小写敏感；只有 0x 地址可归一小写
+  const panel = msg.panel === 'feed' ? 'feed' : 'holders';
+  const tokenKey = chain + '|' + cacheKey(ca);
+  const key = tokenKey + (panel === 'feed' ? '|feed' : '');
   const fomoUrl = 'https://fomo.family/tokens/' + routeChain + '/' + ca;
+
+  const ownerTabId = sender.tab.id;
+  const ownerKey = ownerTabId + '|' + panel;
+  // Both panels may load concurrently for one token. Changing token cancels both,
+  // including when the replacement request is served from cache.
+  for (const [id, old] of fomoMirrorActive) {
+    if (old.ownerTabId === ownerTabId && old.tokenKey !== tokenKey) {
+      old.cancelled = true;
+      closeMirrorTab(old.tabId);
+      fomoMirrorActive.delete(id);
+    }
+  }
 
   if (!msg.force) {
     const hit = fomoMirrorCache.get(key);
     if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
     if (hit) fomoMirrorCache.delete(key);
   }
-  const ownerTabId = sender.tab.id;
-  const active = fomoMirrorActive.get(ownerTabId);
+  const active = fomoMirrorActive.get(ownerKey);
   if (active && active.key === key && !active.cancelled) {
     return active.promise;
   }
@@ -924,11 +944,11 @@ async function handleFomoTokenData(msg, sender) {
     closeMirrorTab(active.tabId);
   }
 
-  const job = { key, tabId: null, cancelled: false, promise: null };
+  const job = { key, tokenKey, panel, ownerTabId, activeRead: msg.activeRead === true, tabId: null, cancelled: false, promise: null };
   job.promise = readFomoMirror(job, ca, chain, fomoUrl).finally(() => {
-    if (fomoMirrorActive.get(ownerTabId) === job) fomoMirrorActive.delete(ownerTabId);
+    if (fomoMirrorActive.get(ownerKey) === job) fomoMirrorActive.delete(ownerKey);
   });
-  fomoMirrorActive.set(ownerTabId, job);
+  fomoMirrorActive.set(ownerKey, job);
   return job.promise;
 }
 
