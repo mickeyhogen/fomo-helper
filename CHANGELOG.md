@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.25 — 2026-09-06
+
+### English
+
+- Newest now requires at least 3 likes. Updated the Chinese and English labels and empty-state messages. By likes keeps its existing behavior.
+
+### 中文
+
+- 「最新」改为只显示 ≥3 赞的评论，同步中英文按钮和空态提示；「按赞」保持原有规则。
+
 ## v0.9.24 — 2026-09-06
 
 ### English

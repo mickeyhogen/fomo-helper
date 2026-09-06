@@ -197,14 +197,14 @@
       fCeleb: '名人背书', fViews: '最高浏览', fLikes: '最高点赞', fComments: '最高评论', fCommunity: '社区参与', fNegative: '负面事件',
       fIdentity: '身份', fAddress: '地址分析',
       tabMeta: 'Meta', tabThesis: 'Thesis', tabHolders: 'Holders',
-      sortLikes: '按赞', sortTime: '最新 ≥2赞',
+      sortLikes: '按赞', sortTime: '最新 ≥3赞',
       readingHolders: '读取页面持仓表…', readingTable: '读取持仓表…',
       scrollHolders: '把页面的 Holders 表滚动到可见即可显示持仓', scrollTable: '把页面的 Holders 表滚动到可见即可显示',
       noThesis: '持有人里暂时没有写 thesis 的',
       friendsOn: '页面开着 Friends only 筛选——关闭它才能显示全部数据', friendsMaybe: '（若开着 Friends only 筛选，需关闭才有全量数据）',
       bottomTab: '把 fomo 下方面板切到「Holders」标签才有数据（现在停在别的标签）',
       translated: '页面被浏览器翻译了（Chrome 网页翻译会改掉表格文字）——点地址栏翻译图标选「显示原文」，再刷新', diag: '诊断', diagTitle: '生成一段排查信息并复制，发给作者即可', diagCopied: '诊断信息已复制', diagShown: '诊断信息见下方',
-      feedNoLikes: '已读到的评论里暂时没有 ≥2 赞的发言', feedMissing: '暂时读不到这只币的评论，请重试',
+      feedNoLikes: '已读到的评论里暂时没有 ≥3 赞的发言', feedMissing: '暂时读不到这只币的评论，请重试',
       feedNeedsPage: 'Fomo 评论需要在前台加载一次，读取完成后自动返回。', feedReadAction: '打开 Fomo 读取，完成后返回',
       feedLoading: '正在读取这只币的评论…', feedEmpty: 'Fomo 暂时没有显示这只币的评论',
       feedLikes: '持仓表未提供观点，以下按已读到的评论赞数排序', feedRetry: '重试读取评论',
@@ -243,14 +243,14 @@
       fCeleb: 'Celebrity backing', fViews: 'Top views', fLikes: 'Top likes', fComments: 'Top comments', fCommunity: 'Community', fNegative: 'Negative events',
       fIdentity: 'Identity', fAddress: 'Address analysis',
       tabMeta: 'Meta', tabThesis: 'Thesis', tabHolders: 'Holders',
-      sortLikes: 'By likes', sortTime: 'Newest ≥2 likes',
+      sortLikes: 'By likes', sortTime: 'Newest ≥3 likes',
       readingHolders: 'Reading the Holders table…', readingTable: 'Reading the Holders table…',
       scrollHolders: 'Scroll the Holders table into view to load positions', scrollTable: 'Scroll the Holders table into view to load',
       noThesis: 'No holder has written a thesis yet',
       friendsOn: '“Friends only” is on — turn it off to see everyone', friendsMaybe: ' (if “Friends only” is on, turn it off for the full list)',
       bottomTab: 'Switch fomo’s bottom panel to the “Holders” tab (it’s on another tab now)',
       translated: 'This page is being translated by the browser, which rewrites the table text — choose “Show original” in the address-bar translate icon, then refresh', diag: 'Diagnose', diagTitle: 'Build a short report and copy it — paste it to the author', diagCopied: 'Diagnostic copied', diagShown: 'Diagnostic shown below',
-      feedNoLikes: 'No loaded comment has ≥2 likes yet', feedMissing: 'Comments for this token could not be read. Please retry.',
+      feedNoLikes: 'No loaded comment has ≥3 likes yet', feedMissing: 'Comments for this token could not be read. Please retry.',
       feedNeedsPage: 'Fomo needs a foreground page to load comments. You will return when reading finishes.', feedReadAction: 'Read in Fomo, then return',
       feedLoading: 'Reading comments for this token…', feedEmpty: 'Fomo is not showing comments for this token yet',
       feedLikes: 'No thesis column is available; sorting the loaded comments by likes', feedRetry: 'Retry comments',
@@ -399,7 +399,7 @@
     // v0.8：卡片顶部三个标签页（跟 fomo 自家 tab 的用法一致）。
     // 'narrative' 叙事（默认）| 'views' 观点（持有人 thesis，按点赞排）| 'holders' 持仓者
     tab: 'narrative',
-    thesisSort: 'likes',  // v0.8.7：'likes' 按赞（默认）| 'time' 最新（≥2赞且配到时间的）；换币不重置
+    thesisSort: 'likes',  // 'likes' 按赞（默认）| 'time' 最新（≥3赞且配到时间的）；换币不重置
     tweetsOpen: false,   // 来源推文段是否展开
     status: 'idle',      // DeBot 段状态（对外兼容字段）
     history: null,       // DeBot data.history
@@ -4291,7 +4291,7 @@ details.tweets > summary { color: #9aa0aa; }
     let shown = rows;
     if (state.thesisSort === 'time') {
       shown = feed
-        .filter((r) => (r.likes || 0) >= 2 && Number.isFinite(r.ageMin) && r.ageMin >= 0)
+        .filter((r) => (r.likes || 0) >= 3 && Number.isFinite(r.ageMin) && r.ageMin >= 0)
         .slice()
         .sort((a, b) => a.ageMin - b.ageMin);
       if (!shown.length) {

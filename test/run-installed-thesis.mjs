@@ -39,9 +39,9 @@ const check = (name, ok, detail) => {
 function fomoPage(u) {
   const ca = u.pathname.split('/').at(-1);
   const rows = [
-    '<div class="crow"><span>newest_user</span> <span>Thesis</span> <span>Closed</span> <span>5m</span> <span>▲ 10%</span> <span>NEWEST_CLOSED actual comment ending 2026</span> <span>7</span> <span>1 newer</span></div>',
+    '<div class="crow"><span>newest_user</span> <span>Thesis</span> <span>Closed</span> <span>5m</span> <span>▲ 10%</span> <span>NEWEST_CLOSED actual comment ending 2026</span> <span>3</span> <span>1 newer</span></div>',
     '<div class="crow"><span>older_user</span> <span>Thesis</span> <span>2h</span> <span>$2K</span> <span>( ▼ 4% )</span> <span>OLDER_HIGH_LIKES</span> <span>12</span></div>',
-    '<div class="crow"><span>low_user</span> <span>Thesis</span> <span>1m</span> <span>$3K</span> <span>( ▲ 1% )</span> <span>LOW_LIKES</span> <span>1</span></div>',
+    '<div class="crow"><span>low_user</span> <span>Thesis</span> <span>1m</span> <span>$3K</span> <span>( ▲ 1% )</span> <span>LOW_LIKES</span> <span>2</span></div>',
   ];
   const comments = ca === ZERO ? '' : ca === LOW ? rows[2] : rows.join('');
   // As on the live site, activating one tab removes the other panel from the DOM.
@@ -102,7 +102,7 @@ const snap = page => lensEval(page, `return {name:this.querySelector('.name').te
   count:this.querySelectorAll('.slot-thesis .row-item').length};`);
 const readComments = async page => {
   if (BASELINE) return;
-  const ready=await until(async()=>{const s=await snap(page);return s && (s.authors.length || /前台加载|没有 ≥2|没有显示|需要先登录/.test(s.text)) ? s : null;}, 35000);
+  const ready=await until(async()=>{const s=await snap(page);return s && (s.authors.length || /前台加载|没有 ≥3|没有显示|需要先登录/.test(s.text)) ? s : null;}, 35000);
   if (ready?.text.includes('前台加载')) await lensClick(page, '.slot-thesis > .sbtn');
 };
 const openViews = async page => {
@@ -130,8 +130,8 @@ try {
   } else {
     await until(async () => (await snap(page))?.text.includes('NEWEST_CLOSED'), 33000);
     let s = await snap(page);
-    check('Newest independently reads comments with Holders unmounted', s.authors.join(',') === '@newest_user,@older_user', s);
-    check('Closed and newer badges preserve likes and numeric-ending text', s.likes.join(',') === '♥ 7,♥ 12' && s.bodies[0].includes('ending 2026'), s);
+    check('Newest includes 3 likes and excludes 2 likes with Holders unmounted', s.authors.join(',') === '@newest_user,@older_user', s);
+    check('Closed and newer badges preserve likes and numeric-ending text', s.likes.join(',') === '♥ 3,♥ 12' && s.bodies[0].includes('ending 2026'), s);
     check('the owner Fomo page is neither switched nor scrolled', JSON.stringify(ownerBefore) === JSON.stringify(await page.evaluate(() => ({marker:window.__ownerMarker, switches:window.__tabSwitches, scroll:scrollY}))));
     check('temporary comment tab is closed', await until(() => emptyTemporaryTabs(page)));
     check('the explicit reader tab closes and owner focus is preserved', JSON.stringify(windowBefore)===JSON.stringify(await worker.evaluate(async()=> (await chrome.windows.getAll()).map(w=>({id:w.id,focused:w.focused})))));
@@ -174,7 +174,7 @@ try {
     check('wait for token context before switching the source tab', (await snap(page)).authors[0] === '@newest_user', await snap(page));
     check('bootstrap readers close their temporary tabs', await until(() => emptyTemporaryTabs(page), 33000));
 
-    for (const [ca, expected] of [[LOW,'没有 ≥2 赞'], [ZERO,'没有显示这只币的评论'], [BROKEN,'暂时读不到这只币的评论'], [AUTH,'需要先登录']]) {
+    for (const [ca, expected] of [[LOW,'没有 ≥3 赞'], [ZERO,'没有显示这只币的评论'], [BROKEN,'暂时读不到这只币的评论'], [AUTH,'需要先登录']]) {
       await page.goto(nativeUrl(ca));
       await until(async () => !!await lensEval(page, 'return !!this.querySelector(".tab");'));
       await openViews(page);
@@ -203,9 +203,9 @@ try {
     await page.evaluate(url => history.pushState({}, '', url), 'https://gmgn.ai/robinhood/token/'+LOW);
     await until(async () => (await snap(page))?.name === 'LOW_TOKEN', 12000);
     await openViews(page);await lensClick(page, '.slot-thesis .sbtn:nth-child(2)');await readComments(page);
-    await until(async () => (await snap(page))?.text.includes('没有 ≥2 赞'), 33000);
+    await until(async () => (await snap(page))?.text.includes('没有 ≥3 赞'), 33000);
     await sleep(6500);
-    check('a late old-token feed cannot replace the new token', (await snap(page)).text.includes('没有 ≥2 赞') && !(await snap(page)).text.includes('NEWEST_CLOSED'), await snap(page));
+    check('a late old-token feed cannot replace the new token', (await snap(page)).text.includes('没有 ≥3 赞') && !(await snap(page)).text.includes('NEWEST_CLOSED'), await snap(page));
     check('no temporary reader remains after token switch', await until(() => emptyTemporaryTabs(page), 33000));
   }
 } catch(e) {check('acceptance sequence completed', false, e.stack);}

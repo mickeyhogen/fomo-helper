@@ -19,7 +19,7 @@ One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, ho
 
 **Meta** shows the DeBot narrative, rating rationale and source tweets. Origin and rationale are open by default; additional sections can be expanded. Secondary-pool chips come from DexScreener.
 
-**Thesis** lists the highest-liked holder theses, up to 30, with position and PnL. The total reported by Fomo and the truncation notice are preserved. Selecting **Newest ≥2 likes** reads the token’s comments independently, including authors who closed their positions. If the holder table does not provide theses, **By likes** sorts the loaded comments and labels that coverage. Loading, login, retry and an empty result are shown separately.
+**Thesis** lists the highest-liked holder theses, up to 30, with position and PnL. The total reported by Fomo and the truncation notice are preserved. Selecting **Newest ≥3 likes** reads the token’s comments independently, including authors who closed their positions. If the holder table does not provide theses, **By likes** sorts the loaded comments and labels that coverage. Loading, login, retry and an empty result are shown separately.
 
 **Holders** shows the six largest loaded positions, their PnL and holding duration; hover a row for average entry. The share bar uses **all loaded holder rows**, not just those six. It is not a complete on-chain ownership statistic.
 

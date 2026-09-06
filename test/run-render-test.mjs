@@ -931,14 +931,14 @@ try {
     ]);
   }
 
-  // --- 19d (v0.8.7) Thesis 排序切换：默认按赞；最新档 = ≥2赞且配到时间，新→旧 ---
+  // --- 19d (v0.8.7) Thesis 排序切换：默认按赞；最新档 = ≥3赞且配到时间，新→旧 ---
   {
     await clickTab(page, 'views');
     await sleep(150);
     await page.evaluate(() => {
       const sh = window.__fomoDebotTestHandle.shadow;
       const btns = sh.querySelectorAll('.slot-thesis .sbtn');
-      if (btns[1]) btns[1].click();   // 切「最新 ≥2赞」
+      if (btns[1]) btns[1].click();   // 切「最新 ≥3赞」
     });
     await sleep(150);
     const ts = await snap(page);
@@ -952,7 +952,7 @@ try {
     const back = await snap(page);
     await clickTab(page, 'narrative');
     await sleep(100);
-    step('步骤 19d · Thesis 排序切换：最新档只列 ≥2赞且有时间的，按时间新→旧；默认仍按赞', [
+    step('步骤 19d · Thesis 排序切换：最新档只列 ≥3赞且有时间的，按时间新→旧；默认仍按赞', [
       chk('最新档只剩 2 条（MEADGod 无时间被排除）', ts.thesisRows === 2, ts.thesisRows),
       chk('顺序 = 5m 的 ogle 在前', ts.thesisAuthors.join(',') === '@ogle,@31337___', ts.thesisAuthors),
       chk('切回按赞恢复 3 条原序', back.thesisAuthors.join(',') === '@31337___,@MEADGod,@ogle', back.thesisAuthors),
@@ -2212,7 +2212,7 @@ try {
     step('步骤 34 · lang=en：段标题/排序钮/持有时长/按钮提示全英文，卡片壳无中文残留', [
       chk('段标题英文（Origin / Rating rationale）', e1.summaries.includes('Origin') && e1.summaries.includes('Rating rationale'), e1.summaries),
       chk('推文段英文摘要', e1.tweetsSummary.indexOf('Source tweets') === 0, e1.tweetsSummary),
-      chk('排序钮英文', enProbe.sortBtns.join('|') === 'By likes|Newest ≥2 likes', enProbe.sortBtns),
+      chk('排序钮英文', enProbe.sortBtns.join('|') === 'By likes|Newest ≥3 likes', enProbe.sortBtns),
       chk('持有时长英文（held 2d 4h）', e1.kolLines[0].includes('held 2d 4h'), e1.kolLines[0]),
       chk('复制钮提示英文', enProbe.copyTitle === 'Copy contract address', enProbe.copyTitle),
       chk('卡片壳（标题/按钮/灰字/标签）无中文残留（品牌名除外）', enProbe.cjkInChrome === 0, enProbe.cjkInChrome),
@@ -2492,7 +2492,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.24', mf.version === '0.9.24', mf.version),
+    chk('版本号为 0.9.25', mf.version === '0.9.25', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions = storage,scripting',
