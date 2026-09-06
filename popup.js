@@ -7,6 +7,7 @@
 const OPEN_MODES = ['compact', 'full', 'off'];
 const DEFAULTS = {
   openMode: 'compact',
+  caPageAutoOpen: true,
   hoverPreview: true,
   updateCheck: true,
   lang: 'zh',
@@ -24,9 +25,14 @@ function resolveOpenMode(v) {
   return 'compact';
 }
 
+function resolveCaPageAutoOpen(v) {
+  return typeof v.caPageAutoOpen === 'boolean' ? v.caPageAutoOpen : resolveOpenMode(v) !== 'off';
+}
+
 const el = (id) => document.getElementById(id);
 const ui = {
   openMode: el('openMode'),
+  caPageAutoOpen: el('caPageAutoOpen'),
   hoverPreview: el('hoverPreview'),
   updateCheck: el('updateCheck'),
   brightness: el('brightness'),
@@ -39,10 +45,12 @@ const ui = {
 const EN = {
   title: 'Fomo Lens',
   intro: 'View narratives, Fomo theses and holdings on Fomo, GMGN and xxyy. Sign in to Fomo in this browser first.',
-  general: 'General', openMode: 'Open cards automatically',
-  compact: 'Compact (origin and rating rationale)', full: 'Fully expanded', off: 'Off (open with the corner button)',
-  openHint: 'Compact is the default. When off, use the 🔍 button in the bottom-right corner.',
-  hover: 'Hover preview', hoverHint: 'Preview tokens in the left-hand list',
+  general: 'General', openMode: 'Card content',
+  compact: 'Compact (origin and rating rationale)', full: 'Fully expanded',
+  openHint: 'Choose how much content to expand. Hover previews stay compact.',
+  caPage: 'Current CA page', caPageOpen: 'Open by default', caPageOff: 'Keep closed by default',
+  caPageHint: 'Applies when entering or switching token pages. Hover previews still work; click Fomo Lens to open manually.',
+  hover: 'Hover preview', hoverHint: 'On by default; pause on a token row to preview it',
   language: 'Default language', languageHint: 'You can also switch languages in the card',
   edition: 'Check for updates', updateHint: 'Check GitHub Releases every 6 hours; turn off to stop checking.',
   brightness: 'Card brightness', opacity: 'Card opacity', opacityHint: '35%–100%; also available under ☀ in the card',
@@ -62,28 +70,37 @@ function paintPopupLanguage() {
   } catch (_) { /* Keep the existing attribution if the extension is unloading. */ }
 }
 
-// 同时取回老的 autoOpen，供 resolveOpenMode 迁移判定（openMode/autoOpen 用 null 兜底以区分"没存过"）
-chrome.storage.sync.get(Object.assign({}, DEFAULTS, { openMode: null, autoOpen: null }), (v) => {
+// Read unset values as null so existing automatic-opening preferences survive migration.
+chrome.storage.sync.get(Object.assign({}, DEFAULTS, { openMode: null, autoOpen: null, caPageAutoOpen: null }), (v) => {
   const raw = v || {};
   const mode = resolveOpenMode(raw);
-  ui.openMode.value = mode;
+  // Legacy off opened manual cards fully; keep that layout when separating the settings.
+  const layout = mode === 'off' ? 'full' : mode;
+  const caPageAutoOpen = resolveCaPageAutoOpen(raw);
+  ui.openMode.value = layout;
+  ui.caPageAutoOpen.value = caPageAutoOpen ? 'open' : 'off';
   ui.hoverPreview.checked = raw.hoverPreview !== false;
   ui.updateCheck.checked = raw.updateCheck !== false;
   ui.lang.value = raw.lang === 'en' ? 'en' : 'zh';
   paintPopupLanguage();
-  // 迁移落地：从老 autoOpen 迁上来（storage 里没有合法 openMode）时，把 openMode 写实、清掉 autoOpen
-  if (OPEN_MODES.indexOf(raw.openMode) === -1) {
-    chrome.storage.sync.set({ openMode: mode });
-    if ('autoOpen' in raw && raw.autoOpen !== null) {
-      try { chrome.storage.sync.remove('autoOpen'); } catch (_) { /* 忽略 */ }
-    }
+  // Persist layout and page behavior together: an old off preference must never flash open.
+  if (raw.openMode !== layout || typeof raw.caPageAutoOpen !== 'boolean') {
+    chrome.storage.sync.set({ openMode: layout, caPageAutoOpen }, () => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      if (raw.autoOpen !== null && raw.autoOpen !== undefined) {
+        try { chrome.storage.sync.remove('autoOpen'); } catch (_) { /* 忽略 */ }
+      }
+    });
   }
 });
 
 // ---- 通用项：改完立刻生效 ----
 ui.openMode.addEventListener('change', () => {
-  const m = OPEN_MODES.indexOf(ui.openMode.value) !== -1 ? ui.openMode.value : 'compact';
+  const m = ui.openMode.value === 'full' ? 'full' : 'compact';
   chrome.storage.sync.set({ openMode: m });
+});
+ui.caPageAutoOpen.addEventListener('change', () => {
+  chrome.storage.sync.set({ caPageAutoOpen: ui.caPageAutoOpen.value === 'open' });
 });
 ui.hoverPreview.addEventListener('change', () => {
   chrome.storage.sync.set({ hoverPreview: ui.hoverPreview.checked });
@@ -120,4 +137,3 @@ ui.opacity.addEventListener('input', () => {
   ui.opacityVal.textContent = o + '%';
   chrome.storage.local.set({ displayOpacity: o });
 });
-

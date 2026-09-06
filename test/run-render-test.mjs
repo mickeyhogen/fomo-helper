@@ -2099,7 +2099,7 @@ try {
     await pMon.close();
   }
 
-  // --- 32 设置面板：自动弹出模式下拉 + 迁移显示 ---
+  // --- 32 设置面板：内容展开与当前 CA 页独立设置 + 迁移显示 ---
   {
     const pp1 = await openPopup({});
     const v1 = await pp1.evaluate(() => ({
@@ -2107,14 +2107,19 @@ try {
       noAutoOpenCheckbox: !document.getElementById('autoOpen'),
       options: Array.from(document.getElementById('openMode').options).map((o) => o.value + ':' + o.textContent),
       value: document.getElementById('openMode').value,
+      pageOptions: Array.from(document.getElementById('caPageAutoOpen').options).map(o => o.value + ':' + o.textContent),
+      pageValue: document.getElementById('caPageAutoOpen').value,
+      hover: document.getElementById('hoverPreview').checked,
       titlesJoin: Array.from(document.querySelectorAll('.gtitle')).map((g) => g.textContent).join(','),
     }));
-    step('步骤 32 · 设置面板：自动弹出模式下拉（三档中文标签，替换旧 autoOpen 勾选框）', [
+    step('步骤 32 · 设置面板：当前 CA 页与卡片内容分开，悬停默认开启', [
       chk('openMode 下拉存在', v1.hasSelect, v1.hasSelect),
       chk('旧的 autoOpen 勾选框已移除', v1.noAutoOpenCheckbox, v1.noAutoOpenCheckbox),
-      chk('三档齐全且标签正确',
-        v1.options.join('|') === 'compact:精简展开（只显示起源+评级理由）|full:全部展开|off:不自动弹出（点右下角按钮才显示）',
+      chk('内容展开两档齐全',
+        v1.options.join('|') === 'compact:精简展开（只显示起源+评级理由）|full:全部展开',
         v1.options),
+      chk('当前 CA 页独立两档且默认展开', v1.pageOptions.join('|') === 'open:默认展开|off:默认不弹' && v1.pageValue === 'open', v1),
+      chk('悬停默认开启', v1.hover, v1.hover),
       chk('默认选中 compact', v1.value === 'compact', v1.value),
       chk('公开版只有「通用」一组', v1.titlesJoin === '通用', v1.titlesJoin),
     ]);
@@ -2127,12 +2132,12 @@ try {
       return new Promise((r) => chrome.storage.sync.get({ openMode: null }, (v) => r(v.openMode)));
     });
     const ppOff = await openPopup({ autoOpen: false });
-    const offVal = await ppOff.evaluate(() => document.getElementById('openMode').value);
+    const offVal = await ppOff.evaluate(() => ({layout: document.getElementById('openMode').value, page: document.getElementById('caPageAutoOpen').value}));
     const ppOn = await openPopup({ autoOpen: true });
     const onVal = await ppOn.evaluate(() => document.getElementById('openMode').value);
     step('步骤 32b · 设置面板：改档写 openMode；老 autoOpen 迁移到正确档位显示', [
       chk('改选"全部展开"写入 openMode=full', savedFull === 'full', savedFull),
-      chk('老 autoOpen:false → 下拉迁移显示 off', offVal === 'off', offVal),
+      chk('老 autoOpen:false → 当前页不弹且保留手动全展开', offVal.layout === 'full' && offVal.page === 'off', offVal),
       chk('老 autoOpen:true → 下拉迁移显示 compact', onVal === 'compact', onVal),
     ]);
     await pp1.close();
@@ -2492,7 +2497,7 @@ try {
 {
   const mf = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   step('步骤 27 · manifest 版本 / 最小权限面：无任何通配授权', [
-    chk('版本号为 0.9.25', mf.version === '0.9.25', mf.version),
+    chk('版本号为 0.9.26', mf.version === '0.9.26', mf.version),
     chk('完全没有 optional_host_permissions（通配权限已随分析源移除）',
       mf.optional_host_permissions === undefined, mf.optional_host_permissions),
     chk('permissions = storage,scripting',

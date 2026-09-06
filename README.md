@@ -4,7 +4,13 @@
 
 One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, holders and Fomo holding share. XXYY supports both its old and new layouts, including `www.xxyy.io` and `pro.xxyy.io`.
 
-[Download v0.9.25](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.25/fomo-helper-v0.9.25.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
+[Public stable v0.9.25](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.25/fomo-helper-v0.9.25.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
+
+## v0.9.26 preview
+
+Hover previews remain enabled by default. **Current CA page** now separately offers **Open by default** or **Keep closed by default**. It applies when entering or switching token pages; when closed, hovering still previews a token and the Fomo Lens button opens the current CA manually. Fresh installs keep automatic opening enabled; existing disabled preferences remain disabled. **Card content** separately chooses compact or fully expanded sections.
+
+This preview ZIP is supplied separately; the public download above remains v0.9.25.
 
 ## New since v0.9.8
 
@@ -36,7 +42,7 @@ Chrome, Edge and Brave are supported; Safari and Firefox are not.
 
 **Updating from v0.9.8:** overwrite the original folder and click the extension's reload button. The public extension ID is unchanged, so settings are retained. Chrome may ask you to enable the extension or approve its newly added site access. Refresh existing website tabs once to clear legacy listeners. Later reloads reconnect automatically. If automatic opening was previously disabled, that preference stays disabled; use the Fomo Lens button or change the setting.
 
-The settings panel controls language, automatic opening, hover preview, brightness, opacity and GitHub update checks. GitHub checks are cached for six hours and can be disabled.
+The settings panel controls language, current-CA page opening, card content expansion, hover preview, brightness, opacity and GitHub update checks. GitHub checks are cached for six hours and can be disabled.
 
 ## How Fomo data is read
 

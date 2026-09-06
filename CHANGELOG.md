@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.26 — Preview
+
+### English
+
+- Separate **Current CA page** opening from **Card content** expansion: open or keep closed by default, with hover previews still enabled by default.
+- Apply the page preference immediately and on navigation, including clicks from a preview and delayed XXYY pool resolution. The floating button still opens the current token manually.
+- Preserve older automatic-opening, layout and hover preferences during migration.
+
+### 中文
+
+- 新增「当前 CA 页：默认展开 / 默认不弹」，与「卡片内容」展开程度分开；悬停仍默认弹框。
+- 设置即时生效，切换 CA、从预览点进代币页和池子解析迟到时均遵守开关；浮钮仍可手动打开当前币。
+- 升级保留原有自动弹出、内容展开和悬停偏好。
+
 ## v0.9.25 — 2026-09-06
 
 ### English

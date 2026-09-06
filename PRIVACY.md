@@ -32,7 +32,7 @@ These providers can observe the requested address or tweet ID, the request time 
 
 ## Browser storage / 浏览器存储
 
-- `chrome.storage.sync`: language, automatic opening, hover preview and update-check preferences. Chrome may synchronize these settings through its own browser account feature. / 语言、自动弹出、悬停及更新偏好；浏览器可能通过自己的账号同步这些设置。
+- `chrome.storage.sync`: language, current-CA automatic opening, card content expansion, hover preview and update-check preferences. Chrome may synchronize these settings through its own browser account feature. / 语言、当前 CA 页自动弹出、内容展开程度、悬停及更新偏好；浏览器可能通过自己的账号同步这些设置。
 - `chrome.storage.local`: card/magnifier position, size, appearance and release-check cache. / 卡片及放大镜的位置、尺寸、外观与版本检查缓存。
 - `chrome.storage.session` and service-worker memory: bounded caches of public narrative, tweet and pool data. Fomo snapshots are held in service-worker memory for up to 60 seconds. / 叙事、推文、池子数据缓存；Fomo 快照只在后台内存短暂保留，最多 60 秒。
 

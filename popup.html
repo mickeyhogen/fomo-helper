@@ -65,18 +65,25 @@
   <div class="group">
     <div class="gtitle" data-i18n="general">通用</div>
     <div class="field">
-      <label for="openMode" data-i18n="openMode">自动弹出模式</label>
+      <label for="openMode" data-i18n="openMode">卡片内容</label>
       <select id="openMode">
         <option value="compact" data-i18n="compact">精简展开（只显示起源+评级理由）</option>
         <option value="full" data-i18n="full">全部展开</option>
-        <option value="off" data-i18n="off">不自动弹出（点右下角按钮才显示）</option>
       </select>
-      <div class="hint" data-i18n="openHint">精简为默认；不自动弹出时点右下角「🔍」钮才显示</div>
+      <div class="hint" data-i18n="openHint">选择内容展开程度；悬停预览始终精简显示</div>
+    </div>
+    <div class="field">
+      <label for="caPageAutoOpen" data-i18n="caPage">当前 CA 页</label>
+      <select id="caPageAutoOpen">
+        <option value="open" data-i18n="caPageOpen">默认展开</option>
+        <option value="off" data-i18n="caPageOff">默认不弹</option>
+      </select>
+      <div class="hint" data-i18n="caPageHint">进入或切换代币页时生效。不弹时仍可悬停预览，也可点 Fomo Lens 浮钮打开</div>
     </div>
     <div class="row">
       <span>
         <label for="hoverPreview" data-i18n="hover">悬停预览</label>
-        <div class="hint" data-i18n="hoverHint">划过左栏行即预览</div>
+        <div class="hint" data-i18n="hoverHint">默认开启；在代币行停留片刻即弹框</div>
       </span>
       <input type="checkbox" id="hoverPreview">
     </div>

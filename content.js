@@ -151,13 +151,12 @@
   const URL_POLL_MS = 250;
   const LOC_EVENT = 'fomo-debot-locationchange';
 
-  // v0.7.2：autoOpen 布尔升级成 openMode 三档。
-  //   'compact' = 自动弹出但精简（只展开 起源+评级理由，其余全部收起，卡片短）
-  //   'full'    = 自动弹出且全部展开（v0.7.1 的老行为）
-  //   'off'     = 不自动弹出，只有点右下角"叙"钮 / 悬停预览才现身
+  // Card layout and current-CA automatic opening are independent.
+  // Retain legacy off/autoOpen reads until the settings popup migrates them.
   const OPEN_MODES = ['compact', 'full', 'off'];
   const DEFAULTS = {
     openMode: 'compact',
+    caPageAutoOpen: true,
     hoverPreview: true,
     lang: 'zh',
     updateCheck: true,      // v0.9.6：每 6 小时查一次 GitHub 最新版（可关）
@@ -176,7 +175,9 @@
     if (v && v.autoOpen === true) return 'compact';
     return 'compact';
   }
-  const autoOpenEnabled = () => settings.openMode !== 'off';
+  let settingsLoaded = false;
+  const autoOpenEnabled = () => settingsLoaded && (typeof settings.caPageAutoOpen === 'boolean'
+    ? settings.caPageAutoOpen : settings.openMode !== 'off');
 
   let settings = Object.assign({}, DEFAULTS);
 
@@ -571,17 +572,18 @@
     try {
       // 同时把老的 autoOpen 也取回来，供 resolveOpenMode 做迁移判定
       // （openMode 用 null 兜底，才能区分"没存过"与"存了 compact"）。
-      chrome.storage.sync.get(Object.assign({}, DEFAULTS, { openMode: null, autoOpen: null }), (v) => {
+      chrome.storage.sync.get(Object.assign({}, DEFAULTS, { openMode: null, autoOpen: null, caPageAutoOpen: null }), (v) => {
         if (disposed) return;
         const s = Object.assign({}, DEFAULTS, v || {});
         s.openMode = resolveOpenMode(v || {});
         delete s.autoOpen;
         settings = s;
+        settingsLoaded = true;
         // A manual-mode launcher may already exist before async settings arrive.
         paintStaticI18n();
         if (cb) cb();
       });
-    } catch (_) { if (cb) cb(); }
+    } catch (_) { settingsLoaded = true; if (cb) cb(); }
     try {
       chrome.storage.local.get({ [SK.pos]: null, [SK.size]: null, [SK.launcher]: null,
         displayBrightness: 100, displayOpacity: 100, translatorReady: false }, (v) => {
@@ -631,6 +633,7 @@
         let langChanged = false;
         let sourceChanged = false;
         let openModeChanged = false;
+        const pageWasAutoOpen = autoOpenEnabled();
         for (const k in changes) {
           if (k in DEFAULTS) {
             settings[k] = changes[k].newValue;
@@ -639,7 +642,7 @@
             if (k === 'openMode') openModeChanged = true;
             if (k === 'analysisTemplate' || k === 'detailTemplate'
               || k === 'allowPrivateAnalysisSource') sourceChanged = true;
-          } else if (k === 'autoOpen' && !('openMode' in changes)) {
+          } else if (k === 'autoOpen' && changes[k].newValue !== undefined && !('openMode' in changes)) {
             // 老客户端/迁移前只改了 autoOpen → 映射到 openMode
             settings.openMode = resolveOpenMode({ autoOpen: changes[k].newValue });
             openModeChanged = true;
@@ -648,6 +651,12 @@
         if (langChanged) {
           paintStaticI18n();
           if (state.status === 'ready') applyLangChange();
+        }
+        // Page preference changes apply immediately without interrupting a hover preview.
+        // closeCard also invalidates pending resolution/reveal callbacks.
+        if (pageWasAutoOpen !== autoOpenEnabled()) {
+          if (!autoOpenEnabled() && state.open && state.mode === 'url') closeCard();
+          else if (autoOpenEnabled() && !state.open && urlToken) openFromUrl(urlToken);
         }
         // openMode 即时生效：重排当前已开的卡片（compact/full 折叠态随之变化）
         if (openModeChanged && state.open && state.ca && !sourceChanged) {
@@ -4494,7 +4503,8 @@ details.tweets > summary { color: #9aa0aa; }
       if (state.open && !state.pinned) closeCard();
       return;
     }
-    if (autoOpenEnabled() || state.open) openFromUrl(next);
+    if (autoOpenEnabled()) openFromUrl(next);
+    else if (state.open) closeCard();
   }
 
   /**
@@ -4512,7 +4522,8 @@ details.tweets > summary { color: #9aa0aa; }
     // 已经是这只币（xxyy 上 URL 挂的是池子地址，与反解后的 state.ca 不同，所以拿 srcAddr 比）
     if (state.open && state.mode === 'url' && isCurrentToken(hit)) return true;
     urlToken = hit;
-    if (autoOpenEnabled() || state.open) openFromUrl(hit);
+    if (autoOpenEnabled()) openFromUrl(hit);
+    else if (state.open) closeCard();
     return true;
   }
 
