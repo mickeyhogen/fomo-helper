@@ -4,7 +4,7 @@
 
 在 **Fomo、GMGN 和 XXYY** 用同一张卡查看代币叙事、Fomo 观点、持有人和持仓占比。XXYY 的 `www.xxyy.io`、`pro.xxyy.io` 及站内新旧两版界面均支持。
 
-[下载 v0.9.23](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.23/fomo-helper-v0.9.23.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
+[下载 v0.9.25](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.25/fomo-helper-v0.9.25.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
 
 ## 相比 v0.9.8 更新了什么
 
@@ -41,6 +41,8 @@
 ## Fomo 数据怎样取得
 
 在 Fomo 上优先读取当前代币页。三站的评论读取，以及 GMGN / XXYY 的持仓读取，都可以复用已打开的同币 Fomo 页；没有可读页面时，会借用浏览器现有登录状态打开一张不激活的临时 Fomo 页，读取后关闭。Fomo 会暂停后台标签页的评论；没有可读评论时会显示「打开 Fomo 读取，完成后返回」。只有点击这个按钮才会打开前台临时页，读完自动关闭并返回。不会点击、滚动或跳转主人已有的 Fomo 页面。
+
+卡片读取已加载内容。**Friends only** 仍会限制可读取的持有人观点；本版没有独立获取所有人的全部历史观点。
 
 扩展不提取 cookie、登录令牌、私钥或助记词。临时页面会正常向 Fomo 加载数据，因此不能称为“零网络”。叙事、推文和池子查询会把相应 CA 或推文 ID 发给其数据提供方。没有开发者自建采集服务器或遥测。完整访问和存储说明见 [隐私说明](PRIVACY.md)。
 

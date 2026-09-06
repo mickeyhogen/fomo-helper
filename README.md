@@ -4,7 +4,7 @@
 
 One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, holders and Fomo holding share. XXYY supports both its old and new layouts, including `www.xxyy.io` and `pro.xxyy.io`.
 
-[Download v0.9.23](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.23/fomo-helper-v0.9.23.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
+[Download v0.9.25](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.25/fomo-helper-v0.9.25.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
 
 ## New since v0.9.8
 
@@ -41,6 +41,8 @@ The settings panel controls language, automatic opening, hover preview, brightne
 ## How Fomo data is read
 
 On Fomo, the extension first reads the rendered token page. Comment views on all three sites, and holder views on GMGN or XXYY, can also read an already open matching Fomo page. If none is readable, it opens a temporary inactive Fomo token page using your existing browser login and closes that page after reading. Fomo pauses comments in hidden tabs. If no readable comments are available, the card offers **Read in Fomo, then return**. Only clicking this action opens a temporary foreground tab; it closes after reading and returns to the opener. It does not click, scroll or navigate an existing Fomo page.
+
+The card reads loaded content. **Friends only** still limits the holder theses it can read; this release does not independently retrieve everyone’s full thesis history.
 
 The extension does **not** extract cookies, login tokens, private keys or seed phrases. Temporary Fomo pages do make the normal network requests of that website. Public narrative, tweet and pool queries send the relevant contract or tweet ID to their providers. There is no developer-operated collection server or telemetry. See [Privacy](PRIVACY.md) for exact access and storage details.
 
