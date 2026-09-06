@@ -4,13 +4,11 @@
 
 在 **Fomo、GMGN 和 XXYY** 用同一张卡查看代币叙事、Fomo 观点、持有人和持仓占比。XXYY 的 `www.xxyy.io`、`pro.xxyy.io` 及站内新旧两版界面均支持。
 
-[公开稳定版 v0.9.25](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.25/fomo-helper-v0.9.25.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
+[下载 v0.9.26](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.26/fomo-helper-v0.9.26.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
 
-## v0.9.26 预览版
+## v0.9.26 更新
 
 悬停仍默认弹框。设置新增 **当前 CA 页**，可选 **默认展开 / 默认不弹**，进入或切换代币页时生效。选「默认不弹」后，悬停仍可预览，也可点 Fomo Lens 浮钮手动打开当前 CA。新安装默认展开，旧版已关闭自动弹出的偏好会保留；**卡片内容** 单独选择精简或全部展开。
-
-本预览版通过独立 ZIP 提供，上方公开下载仍是 v0.9.25。
 
 ## 相比 v0.9.8 更新了什么
 

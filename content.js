@@ -659,7 +659,9 @@
           else if (autoOpenEnabled() && !state.open && urlToken) openFromUrl(urlToken);
         }
         // openMode 即时生效：重排当前已开的卡片（compact/full 折叠态随之变化）
-        if (openModeChanged && state.open && state.ca && !sourceChanged) {
+        // A pending pool resolution will render with the latest layout when it
+        // completes. Reloading its raw pool address here would discard that result.
+        if (openModeChanged && state.open && state.ca && !sourceChanged && !state.resolving) {
           load(state.ca, state.chain, state.mode, false);
         }
         // 数据源设置即时生效：重新拉当前卡片

@@ -16,6 +16,7 @@ execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',te
 const CA='0x39dbed3a2bd333467115de45665cc57f813c4571';
 const OTHER='0x020bfc650a365f8bb26819deaabf3e21291018b4';
 const POOL='0x1d767e12f99d8c7ac792749209868a1fafec6e1599b5cb9f4582bf5525793598';
+const MIGRATION_POOL=POOL.slice(0,-1)+'9';
 const checks=[],errors=[],hits=[];
 const check=(name,ok,detail)=>{checks.push({name,ok:!!ok,...(!ok?{detail}:{})});console.log((ok?'PASS ':'FAIL ')+name)};
 let delayResolve=false;
@@ -28,8 +29,9 @@ const server=https.createServer({key:fs.readFileSync(temp+'/key'),cert:fs.readFi
   if(u.hostname==='gmgn.ai')return reply(fs.readFileSync(DIR+'/mock-gmgn-installed.html'));
   if(['www.xxyy.io','pro.xxyy.io'].includes(u.hostname))return reply(fs.readFileSync(DIR+'/mock-xxyy-layouts.html'));
   if(u.hostname==='api.dexscreener.com'){
-    const send=()=>reply(JSON.stringify({pairs:u.pathname.includes(POOL)?[{chainId:'robinhood',pairAddress:POOL,baseToken:{address:CA}}]:[]}),'application/json');
-    if(delayResolve&&u.pathname.includes(POOL))return setTimeout(send,1500);
+    const pool=[POOL,MIGRATION_POOL].find(p=>u.pathname.includes(p));
+    const send=()=>reply(JSON.stringify({pairs:pool?[{chainId:'robinhood',pairAddress:pool,baseToken:{address:CA}}]:[]}),'application/json');
+    if(delayResolve&&pool)return setTimeout(send,1500);
     return send();
   }
   if(/debot\.ai$/.test(u.hostname)){
@@ -116,6 +118,18 @@ try{
   delayResolve=false;
   // Legacy values must be honored both before opening the new popup and after migration.
   await popup.close();
+  // Migrating legacy off while a manually opened pool is resolving must retain
+  // the resolver's result. A layout refresh must not treat a pool ID as a CA.
+  await p.goto('about:blank');
+  await worker.evaluate(async()=>{await chrome.storage.sync.clear();await chrome.storage.sync.set({updateCheck:false,openMode:'off'});await chrome.storage.session.clear()});
+  delayResolve=true;hits.length=0;
+  await p.goto('https://pro.xxyy.io/robin/'+MIGRATION_POOL,{waitUntil:'domcontentloaded'});
+  await until(async()=>(await lensSnapshot(p))?.launcher);
+  await lensClick(p,'.launcher');
+  check('manual pool migration starts with a pending resolution',!!await until(()=>hits.some(x=>x.host==='api.dexscreener.com'&&x.path.includes(MIGRATION_POOL))));
+  const migrate=await browser.newPage();await migrate.goto('chrome-extension://'+id+'/popup.html');
+  check('legacy off migration preserves pending manual pool resolution',!!await until(async()=>{const s=await lensSnapshot(p);return s?.card&&s.name==='PONS'}));
+  await migrate.close();delayResolve=false;
   for(const [name,seed,open,layout] of [
     ['legacy off',{openMode:'off',hoverPreview:true},false,'full'],
     ['legacy autoOpen false',{autoOpen:false,hoverPreview:true},false,'full'],
@@ -124,6 +138,9 @@ try{
     ['explicit page false',{openMode:'full',caPageAutoOpen:false},false,'full'],
     ['explicit page true overrides old off',{openMode:'off',caPageAutoOpen:true},true,'full'],
   ]){
+    // The previous case deliberately hovered a row. Keep navigation assertions
+    // independent of a new document firing mouseover under the parked pointer.
+    await p.mouse.move(800,700);
     await p.goto('about:blank');
     await worker.evaluate(async s=>{await chrome.storage.sync.clear();await chrome.storage.sync.set({updateCheck:false,...s})},seed);
     await p.goto('https://fomo.family/tokens/robinhood/'+CA,{waitUntil:'domcontentloaded'});
