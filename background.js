@@ -98,7 +98,7 @@ async function writeCache(prefix, key, res) {
 }
 
 /** 统一的带超时 JSON 取数。返回 {stage, json?, status?}，绝不抛。 */
-async function fetchJson(url, timeoutMs) {
+async function fetchJson(url, timeoutMs, readStory404 = false) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -109,7 +109,17 @@ async function fetchJson(url, timeoutMs) {
       cache: 'no-store',
       headers: { accept: 'application/json' },
     });
-    if (!res.ok) return { stage: 'http', status: res.status };
+    if (!res.ok) {
+      // Only the DeBot story caller needs the explicit no-record JSON in a 404.
+      if (readStory404 && res.status === 404) {
+        const len = Number(res.headers.get('content-length') || 0);
+        if (len <= FETCH_MAX_BYTES) {
+          try { return { stage: 'http', status: res.status, json: await res.json() }; }
+          catch (_) { /* An unreadable error body remains an HTTP failure. */ }
+        }
+      }
+      return { stage: 'http', status: res.status };
+    }
     // K3 审查 F4：上游被劫持回超大响应时别把 service worker 撑爆
     const len = Number(res.headers.get('content-length') || 0);
     if (len > FETCH_MAX_BYTES) return { stage: 'parse' };
@@ -140,7 +150,7 @@ function hasUsableStory(history) {
 
 const fetchOnce = (base, ca) =>
   // DeBot keys EVM records by lowercase; preserve case-sensitive Solana addresses.
-  fetchJson(base + API_PATH + '?ca_address=' + encodeURIComponent(cacheKey(ca)), TIMEOUT_MS);
+  fetchJson(base + API_PATH + '?ca_address=' + encodeURIComponent(cacheKey(ca)), TIMEOUT_MS, true);
 
 async function fetchStory(ca) {
   let firstFailure = '';
@@ -153,7 +163,14 @@ async function fetchStory(ca) {
 
     if (out.stage === 'timeout') { note('请求超时（15 秒）'); continue; }
     if (out.stage === 'network') { note('网络请求失败'); continue; }
-    if (out.stage === 'http') { note('DeBot 返回 HTTP ' + out.status); continue; }
+    if (out.stage === 'http') {
+      const body = out.json;
+      if (out.status === 404 && body && body.code === -1 && body.error === '未找到故事记录') {
+        return { ok: false, kind: 'nostory', error: body.error };
+      }
+      note('DeBot 返回 HTTP ' + out.status);
+      continue;
+    }
     if (out.stage === 'parse') { note('响应不是合法 JSON'); continue; }
 
     const json = out.json;

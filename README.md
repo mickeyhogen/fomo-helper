@@ -4,11 +4,11 @@
 
 One floating card for **Fomo, GMGN and XXYY**: token narratives, Fomo theses, holders and Fomo holding share. XXYY supports both its old and new layouts, including `www.xxyy.io` and `pro.xxyy.io`.
 
-[Download v0.9.26](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.26/fomo-helper-v0.9.26.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
+[Download v0.9.27](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.27/fomo-helper-v0.9.27.zip) · [Guide](https://hogen.pro/fomo-helper/) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md) · MIT · by [@0xHogen](https://x.com/0xHogen)
 
-## New in v0.9.26
+## New in v0.9.27
 
-Hover previews remain enabled by default. **Current CA page** now separately offers **Open by default** or **Keep closed by default**. It applies when entering or switching token pages; when closed, hovering still previews a token and the Fomo Lens button opens the current CA manually. Fresh installs keep automatic opening enabled; existing disabled preferences remain disabled. **Card content** separately chooses compact or fully expanded sections.
+A small maintenance patch: DeBot's explicit “no story record” HTTP 404 now uses the existing empty-state display and ten-minute cache. Authentication failures, rate limits and server failures remain errors. Comment loading, holders, popup behavior, settings, permissions and supported chains are unchanged.
 
 ## New since v0.9.8
 

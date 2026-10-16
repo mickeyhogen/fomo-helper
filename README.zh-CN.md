@@ -4,11 +4,11 @@
 
 在 **Fomo、GMGN 和 XXYY** 用同一张卡查看代币叙事、Fomo 观点、持有人和持仓占比。XXYY 的 `www.xxyy.io`、`pro.xxyy.io` 及站内新旧两版界面均支持。
 
-[下载 v0.9.26](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.26/fomo-helper-v0.9.26.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
+[下载 v0.9.27](https://github.com/mickeyhogen/fomo-helper/releases/download/v0.9.27/fomo-helper-v0.9.27.zip) · [使用说明](https://hogen.pro/fomo-helper/) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md) · MIT · By [@0xHogen](https://x.com/0xHogen)
 
-## v0.9.26 更新
+## v0.9.27 更新
 
-悬停仍默认弹框。设置新增 **当前 CA 页**，可选 **默认展开 / 默认不弹**，进入或切换代币页时生效。选「默认不弹」后，悬停仍可预览，也可点 Fomo Lens 浮钮手动打开当前 CA。新安装默认展开，旧版已关闭自动弹出的偏好会保留；**卡片内容** 单独选择精简或全部展开。
+本次为小范围维护：DeBot 明确返回“未找到故事记录”的 HTTP 404 时，沿用已有“暂无叙事”展示和十分钟缓存。鉴权失败、限流和服务器故障仍按错误处理。评论读取、持仓、弹框、设置、权限和支持链均保持原样。
 
 ## 相比 v0.9.8 更新了什么
 

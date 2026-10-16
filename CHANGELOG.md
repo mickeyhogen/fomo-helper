@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.27 — 2026-10-16
+
+### English
+
+- Recognize DeBot's explicit HTTP 404 no-story response as an empty result. Reuse the existing empty-state display and ten-minute cache instead of reporting a network failure and retrying another domain.
+- Authentication failures, rate limits, generic 404s and server failures remain errors. This release retains the v0.9.26 comment loading, holdings, interactions, settings, permissions and supported chains.
+
+### 中文
+
+- 正确识别 DeBot 明确表示“未找到故事记录”的 HTTP 404，沿用现有“暂无叙事”展示和十分钟缓存，避免误报网络故障及重试备用域名。
+- 鉴权失败、限流、普通 404 和服务器故障仍按错误处理。本版保留 v0.9.26 的评论读取、持仓、交互、设置、权限和支持链。
+
 ## v0.9.26 — 2026-09-06
 
 ### English
