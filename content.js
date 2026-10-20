@@ -2114,11 +2114,12 @@ details.tweets > summary { color: #9aa0aa; }
   // ---------- v0.8.3 池子交易对 chips ----------
   const PAIR_SHOW = 4;   // 头部最多摆几个报价资产 chip，其余收进 +N 与 tooltip
 
+  // A value that rounds up to 1000 of one unit moves to the next one ($999,600 → "$1.0M", not "$1000K").
   function fmtUsd(n) {
     const v = Number(n) || 0;
-    if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
-    if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
-    if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+    if (v >= 1e9 || +(v / 1e6).toFixed(1) >= 1000) return '$' + (v / 1e9).toFixed(1) + 'B';
+    if (v >= 1e6 || +(v / 1e3).toFixed(0) >= 1000) return '$' + (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3 || Math.round(v) >= 1000) return '$' + (v / 1e3).toFixed(0) + 'K';
     return '$' + Math.round(v);
   }
 
@@ -4102,9 +4103,10 @@ details.tweets > summary { color: #9aa0aa; }
   function fmtUsdShort(v) {
     const n = Number(v) || 0;
     const f = (x, d) => x.toFixed(d).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-    if (n >= 1e9) return '$' + f(n / 1e9, 2) + 'B';
-    if (n >= 1e6) return '$' + f(n / 1e6, 2) + 'M';
-    if (n >= 1e3) return '$' + f(n / 1e3, 1) + 'K';
+    // same rule as fmtUsd: a value that rounds up to 1000 of one unit moves to the next one
+    if (n >= 1e9 || +(n / 1e6).toFixed(2) >= 1000) return '$' + f(n / 1e9, 2) + 'B';
+    if (n >= 1e6 || +(n / 1e3).toFixed(1) >= 1000) return '$' + f(n / 1e6, 2) + 'M';
+    if (n >= 1e3 || Math.round(n) >= 1000) return '$' + f(n / 1e3, 1) + 'K';
     return '$' + Math.round(n);
   }
   function renderShare() {
